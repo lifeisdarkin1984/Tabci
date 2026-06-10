@@ -631,7 +631,10 @@ def register(app):
                 reply_markup=back_kb("menu_global")
             )
 
-        await cb.answer()
+        try:
+            await cb.answer()
+        except Exception:
+            pass
 
 
 # ─── helpers ────────────────────────────────────────────────
