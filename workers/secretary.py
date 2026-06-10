@@ -1,5 +1,6 @@
-import asyncio, time
+import asyncio
 from pyrogram import enums
+from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
 from database import q, u
 from utils import get_user_client, ADMIN_ID
 
@@ -17,7 +18,7 @@ async def run():
             for (acc_id, replied_raw) in active:
                 replied = set(replied_raw.split(",")) if replied_raw else set()
                 banners = q(
-                    "SELECT text, file_id, file_type FROM banners "
+                    "SELECT text,file_id,file_type FROM banners "
                     "WHERE account_id=%s AND context='secretary' ORDER BY slot",
                     (acc_id,)
                 )
@@ -34,7 +35,6 @@ async def run():
                         uid = str(dlg.chat.id)
                         if uid in replied:
                             continue
-                        # فقط اگه آخرین پیام از طرف اون کاربر بود
                         async for msg in uc.get_chat_history(dlg.chat.id, limit=1):
                             if msg.from_user and str(msg.from_user.id) == uid:
                                 for b in banners:
@@ -56,11 +56,19 @@ async def run():
                     await uc.stop()
                     u("UPDATE secretary SET replied_users=%s WHERE account_id=%s",
                       (",".join(replied), acc_id))
-                except Exception:
+                except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
+                    u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
+                    print(f"[Secretary] اکانت {acc_id} منقضی شد - غیرفعال شد")
+                    try:
+                        await uc.stop()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    print(f"[Secretary] خطا در اکانت {acc_id}: {e}")
                     try:
                         await uc.stop()
                     except Exception:
                         pass
         except Exception as e:
-            print(f"[Secretary] error: {e}")
-        await asyncio.sleep(1800)  # هر ۳۰ دقیقه
+            print(f"[Secretary] خطای کلی: {e}")
+        await asyncio.sleep(1800)
