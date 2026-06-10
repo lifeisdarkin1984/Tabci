@@ -1,5 +1,6 @@
 import asyncio, time
 from pyrogram import enums
+from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
 from database import q, u
 from utils import get_user_client, ADMIN_ID
 
@@ -53,13 +54,20 @@ async def run():
                         except Exception:
                             pass
                     await uc.stop()
-                    u("UPDATE scheduler SET last_run=%s WHERE account_id=%s",
-                      (now, acc_id))
-                except Exception:
+                    u("UPDATE scheduler SET last_run=%s WHERE account_id=%s", (now, acc_id))
+                except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
+                    u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
+                    print(f"[Scheduler] اکانت {acc_id} منقضی شد - غیرفعال شد")
+                    try:
+                        await uc.stop()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    print(f"[Scheduler] خطا در اکانت {acc_id}: {e}")
                     try:
                         await uc.stop()
                     except Exception:
                         pass
         except Exception as e:
-            print(f"[Scheduler] error: {e}")
-        await asyncio.sleep(60)  # هر دقیقه چک می‌کنه
+            print(f"[Scheduler] خطای کلی: {e}")
+        await asyncio.sleep(60)
