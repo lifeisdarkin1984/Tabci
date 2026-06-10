@@ -78,14 +78,7 @@ def register(app):
             except Exception as e:
                 await cb.answer(f"❌ غیرفعال: {e}", show_alert=True)
 
-        # ══ حذف اکانت ══
-        elif d.startswith("acc_del_"):
-            acc_id = d[8:]
-            await cb.message.edit_text(
-                "❗️ آیا مطمئن هستید؟",
-                reply_markup=confirm_kb(f"acc_del_yes_{acc_id}", "menu_tabchi")
-            )
-
+        # ══ حذف اکانت - تایید ══
         elif d.startswith("acc_del_yes_"):
             acc_id = d[12:]
             u("DELETE FROM accounts WHERE id=%s AND admin_id=%s", (acc_id, ADMIN_ID))
@@ -94,7 +87,21 @@ def register(app):
             u("DELETE FROM banners WHERE account_id=%s", (acc_id,))
             await cb.answer("✅ اکانت حذف شد", show_alert=True)
             accs = q("SELECT id,phone,name FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
-            await cb.message.edit_text("📌 لیست تبچی‌ها:", reply_markup=tabchi_list_kb(accs))
+            if accs:
+                await cb.message.edit_text("📌 لیست تبچی‌ها:", reply_markup=tabchi_list_kb(accs))
+            else:
+                await cb.message.edit_text("هیچ اکانتی باقی نمانده.\n\nبرای افزودن: /add_account",
+                                            reply_markup=back_kb("back_main"))
+
+        # ══ حذف اکانت - سوال ══
+        elif d.startswith("acc_del_"):
+            acc_id = d[8:]
+            acc = q("SELECT name, phone FROM accounts WHERE id=%s", (acc_id,))
+            name = f"{acc[0][0]} | {acc[0][1]}" if acc else acc_id
+            await cb.message.edit_text(
+                f"❗️ آیا مطمئن هستید که می‌خواهید اکانت\n👤 {name}\nرا حذف کنید؟",
+                reply_markup=confirm_kb(f"acc_del_yes_{acc_id}", f"acc_sel_{acc_id}")
+            )
 
         # ══ بروزرسانی همه ══
         elif d == "acc_refresh":
