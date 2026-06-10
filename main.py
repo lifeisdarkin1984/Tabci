@@ -1,5 +1,5 @@
 import asyncio, os
-from pyrogram import Client
+from pyrogram import Client, idle
 from dotenv import load_dotenv
 from database import init_db
 
@@ -25,13 +25,16 @@ async def main():
     text_handler.register(app)
     callbacks.register(app)
 
-    async with app:
-        print("✅ Tabchi Personal bot is running...")
-        await asyncio.gather(
-            secretary.run(),
-            scheduler.run(),
-            app.idle(),
-        )
+    await app.start()
+    print("✅ Tabchi Personal bot is running...")
+
+    await asyncio.gather(
+        secretary.run(),
+        scheduler.run(),
+        idle(),
+    )
+
+    await app.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
