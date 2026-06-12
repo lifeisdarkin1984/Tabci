@@ -309,10 +309,26 @@ def register(app):
             # ══ استخراج لینک ══
             elif d.startswith("m_ext_"):
                 acc_id = d[6:]
+                await cb.message.edit_text(
+                    "🔗 **استخراج لینک**\n\nیکی از روش‌های زیر را انتخاب کنید:",
+                    reply_markup=ext_menu_kb(acc_id)
+                )
+
+            elif d.startswith("ext_single_"):
+                acc_id = d[11:]
                 set_step(ADMIN_ID, f"ext_ch_{acc_id}")
                 await cb.message.edit_text(
-                    "🔗 یوزرنیم کانال پابلیک را بفرستید:\nمثال: `@link4you`",
-                    reply_markup=back_kb(f"acc_manage_{acc_id}")
+                    "🔗 آیدی لینکدونی را بفرستید:\nمثال: `@link4you`",
+                    reply_markup=back_kb(f"m_ext_{acc_id}")
+                )
+
+            elif d.startswith("ext_multi_"):
+                acc_id = d[10:]
+                set_step(ADMIN_ID, f"extm_ch_{acc_id}")
+                await cb.message.edit_text(
+                    "🔗📚 آیدی لینکدونی‌ها را ارسال کنید (هر کدام در یک خط):\n\n"
+                    "مثال:\n`@link4you`\n`@channel2`\n`@channel3`",
+                    reply_markup=back_kb(f"m_ext_{acc_id}")
                 )
 
             # ══ لیست گروه‌ها ══
