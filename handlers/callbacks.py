@@ -31,6 +31,42 @@ def register(app):
             elif d == "menu_global":
                 await cb.message.edit_text("🌐 **مدیریت همگانی**", reply_markup=global_kb())
 
+            # ══ منشی خودکار همگانی ══
+            elif d == "g_sec":
+                await cb.message.edit_text(
+                    "👽 **پنل منشی خودکار همگانی**\n\n"
+                    "پیام‌های خوشامدگویی را تنظیم کنید، سپس «فعال‌سازی برای همه اکانت‌ها»\n"
+                    "را بزنید تا همین پیام‌ها روی منشی خودکار **تمام اکانت‌ها** اعمال شده\n"
+                    "و منشی خودکار برای همه آن‌ها فعال شود.\n\n"
+                    "✅ هر ۳۰ دقیقه چت‌ها بررسی و پاسخ داده می‌شه.",
+                    reply_markup=global_secretary_kb()
+                )
+
+            elif d == "g_sec_apply":
+                banners = q(
+                    "SELECT slot,text,file_id,file_type FROM banners "
+                    "WHERE account_id='global' AND context='secretary' ORDER BY slot"
+                )
+                if not banners:
+                    await cb.answer("⚠️ ابتدا حداقل یک پیام تنظیم کنید", show_alert=True)
+                    return
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                for (aid,) in accs:
+                    u("DELETE FROM banners WHERE account_id=%s AND context='secretary'", (aid,))
+                    for (slot, txt, fid, ftype) in banners:
+                        u("INSERT INTO banners (account_id,admin_id,slot,text,file_id,file_type,context) "
+                          "VALUES(%s,%s,%s,%s,%s,%s,'secretary')",
+                          (aid, ADMIN_ID, slot, txt, fid, ftype))
+                    u("INSERT INTO secretary (account_id,admin_id,is_active) VALUES(%s,%s,1) "
+                      "ON DUPLICATE KEY UPDATE is_active=1", (aid, ADMIN_ID))
+                await cb.answer(f"✅ منشی خودکار برای {len(accs)} اکانت فعال شد", show_alert=True)
+
+            elif d == "g_sec_disable":
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                for (aid,) in accs:
+                    u("UPDATE secretary SET is_active=0 WHERE account_id=%s", (aid,))
+                await cb.answer(f"✅ منشی خودکار برای {len(accs)} اکانت غیرفعال شد", show_alert=True)
+
             # ══ حذف اکانت - تایید (باید قبل از acc_sel_ باشه) ══
             elif d.startswith("acc_del_yes_"):
                 acc_id = d[12:]
@@ -217,9 +253,12 @@ def register(app):
                 parts = d.split("_")
                 acc_id, ctx = parts[2], parts[3]
                 if ctx == "secretary":
-                    row = q("SELECT is_active FROM secretary WHERE account_id=%s", (acc_id,))
-                    active = row[0][0] if row else 0
-                    await cb.message.edit_text("👽 پنل منشی خودکار:", reply_markup=secretary_kb(acc_id, active))
+                    if acc_id == "global":
+                        await cb.message.edit_text("👽 پنل منشی خودکار همگانی:", reply_markup=global_secretary_kb())
+                    else:
+                        row = q("SELECT is_active FROM secretary WHERE account_id=%s", (acc_id,))
+                        active = row[0][0] if row else 0
+                        await cb.message.edit_text("👽 پنل منشی خودکار:", reply_markup=secretary_kb(acc_id, active))
                 else:
                     row = q("SELECT is_active FROM scheduler WHERE account_id=%s", (acc_id,))
                     active = row[0][0] if row else 0
