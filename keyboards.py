@@ -73,8 +73,19 @@ def scheduler_kb(acc_id, active):
         [InlineKeyboardButton("🔙 بازگشت",               callback_data=f"acc_manage_{acc_id}")],
     ])
 
+def global_secretary_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 پیام اول", callback_data="sec_b1_global"),
+         InlineKeyboardButton("💬 پیام دوم", callback_data="sec_b2_global")],
+        [InlineKeyboardButton("💬 پیام سوم", callback_data="sec_b3_global")],
+        [InlineKeyboardButton("🟢 فعال‌سازی برای همه اکانت‌ها", callback_data="g_sec_apply")],
+        [InlineKeyboardButton("🔴 غیرفعال‌سازی برای همه اکانت‌ها", callback_data="g_sec_disable")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
+    ])
+
 def global_kb():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 منشی خودکار همگانی",        callback_data="g_sec")],
         [InlineKeyboardButton("⏰ ارسال زمان‌دار",           callback_data="g_sch")],
         [InlineKeyboardButton("➕ عضو شدن در لیست گروه‌ها", callback_data="g_join")],
         [InlineKeyboardButton("🕵️ عضویت اجبار گروه‌ها",     callback_data="g_fj")],
