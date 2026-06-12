@@ -141,9 +141,7 @@ def register(app):
             if not links:
                 await msg.edit_text("🔍 لینکی یافت نشد.")
             else:
-                out = "🔗 **لینک‌های استخراج شده:**\n---------------------------\n"
-                for i, l in enumerate(links, 1):
-                    out += f"{i} - {l}\n"
+                out = "\n".join(links)
                 # اگه طولانی بود تقسیم کن
                 if len(out) > 4000:
                     chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
