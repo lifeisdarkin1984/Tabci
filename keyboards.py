@@ -24,6 +24,13 @@ def acc_info_kb(acc_id):
         [InlineKeyboardButton("🔙 بازگشت",   callback_data="menu_tabchi")],
     ])
 
+def ext_menu_kb(acc_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 استخراج لینک از یک لینکدونی", callback_data=f"ext_single_{acc_id}")],
+        [InlineKeyboardButton("🔗📚 استخراج لینک از چند لینکدونی", callback_data=f"ext_multi_{acc_id}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data=f"acc_manage_{acc_id}")],
+    ])
+
 def manage_kb(acc_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 آمار اکانت", callback_data=f"m_stats_{acc_id}")],
