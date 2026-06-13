@@ -169,13 +169,18 @@ def register(app):
                     me = await uc.get_me()
                     grps = chns = pvs = 0
                     from pyrogram import enums
-                    async for dialog in uc.get_dialogs():
-                        if dialog.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-                            grps += 1
-                        elif dialog.chat.type == enums.ChatType.CHANNEL:
-                            chns += 1
-                        elif dialog.chat.type == enums.ChatType.PRIVATE:
-                            pvs += 1
+                    try:
+                        async for dialog in uc.get_dialogs():
+                            if dialog is None or dialog.chat is None:
+                                continue
+                            if dialog.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                                grps += 1
+                            elif dialog.chat.type == enums.ChatType.CHANNEL:
+                                chns += 1
+                            elif dialog.chat.type == enums.ChatType.PRIVATE:
+                                pvs += 1
+                    except AttributeError:
+                        pass
                     await uc.stop()
                     await cb.message.edit_text(
                         f"⚙️ به پنل مدیریت `{me.id}` خوش آمدید\n\n"
@@ -346,9 +351,14 @@ def register(app):
                 from pyrogram import enums
                 grps = 0
                 await uc.start()
-                async for dlg in uc.get_dialogs():
-                    if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-                        grps += 1
+                try:
+                    async for dlg in uc.get_dialogs():
+                        if dlg is None or dlg.chat is None:
+                            continue
+                        if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                            grps += 1
+                except AttributeError:
+                    pass
                 await uc.stop()
                 await cb.answer(f"👥 تعداد گروه‌ها: {grps}", show_alert=True)
 
@@ -361,13 +371,18 @@ def register(app):
                 from pyrogram.errors import ChatWriteForbidden
                 left = 0
                 await uc.start()
-                async for dlg in uc.get_dialogs():
-                    if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-                        try:
-                            await uc.send_message(dlg.chat.id, ".")
-                        except ChatWriteForbidden:
-                            await uc.leave_chat(dlg.chat.id)
-                            left += 1
+                try:
+                    async for dlg in uc.get_dialogs():
+                        if dlg is None or dlg.chat is None:
+                            continue
+                        if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                            try:
+                                await uc.send_message(dlg.chat.id, ".")
+                            except ChatWriteForbidden:
+                                await uc.leave_chat(dlg.chat.id)
+                                left += 1
+                except AttributeError:
+                    pass
                 await uc.stop()
                 await cb.answer(f"✅ از {left} گروه محدود خارج شد", show_alert=True)
 
@@ -391,13 +406,18 @@ def register(app):
                 from pyrogram import enums
                 count = 0
                 await uc.start()
-                async for dlg in uc.get_dialogs():
-                    if dlg.chat.type == enums.ChatType.PRIVATE:
-                        try:
-                            await uc.delete_history(dlg.chat.id, revoke=True)
-                            count += 1
-                        except Exception:
-                            pass
+                try:
+                    async for dlg in uc.get_dialogs():
+                        if dlg is None or dlg.chat is None:
+                            continue
+                        if dlg.chat.type == enums.ChatType.PRIVATE:
+                            try:
+                                await uc.delete_history(dlg.chat.id, revoke=True)
+                                count += 1
+                            except Exception:
+                                pass
+                except AttributeError:
+                    pass
                 await uc.stop()
                 await cb.message.edit_text(f"✅ {count} پیوی حذف شد.",
                                             reply_markup=back_kb(f"acc_manage_{acc_id}"))
@@ -491,14 +511,19 @@ def register(app):
                 from pyrogram import enums
                 count = 0
                 await uc.start()
-                async for dlg in uc.get_dialogs():
-                    if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP, enums.ChatType.CHANNEL):
-                        try:
-                            await uc.leave_chat(dlg.chat.id)
-                            count += 1
-                            await asyncio.sleep(0.5)
-                        except Exception:
-                            pass
+                try:
+                    async for dlg in uc.get_dialogs():
+                        if dlg is None or dlg.chat is None:
+                            continue
+                        if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP, enums.ChatType.CHANNEL):
+                            try:
+                                await uc.leave_chat(dlg.chat.id)
+                                count += 1
+                                await asyncio.sleep(0.5)
+                            except Exception:
+                                pass
+                except AttributeError:
+                    pass
                 await uc.stop()
                 await cb.message.edit_text(f"✅ از {count} گروه و کانال خارج شد.",
                                             reply_markup=back_kb(f"acc_manage_{acc_id}"))
@@ -706,14 +731,19 @@ async def _send_to_pvs(bot_client, acc_id, text):
     display = me_info[0][0] if me_info else acc_id
     ok = fail = 0
     await uc.start()
-    async for dlg in uc.get_dialogs():
-        if dlg.chat.type == enums.ChatType.PRIVATE:
-            try:
-                await uc.send_message(dlg.chat.id, text)
-                ok += 1
-                await asyncio.sleep(2)
-            except Exception:
-                fail += 1
+    try:
+        async for dlg in uc.get_dialogs():
+            if dlg is None or dlg.chat is None:
+                continue
+            if dlg.chat.type == enums.ChatType.PRIVATE:
+                try:
+                    await uc.send_message(dlg.chat.id, text)
+                    ok += 1
+                    await asyncio.sleep(2)
+                except Exception:
+                    fail += 1
+    except AttributeError:
+        pass
     await uc.stop()
     await bot_client.send_message(
         ADMIN_ID,
@@ -743,21 +773,26 @@ async def _send_to_groups(bot_client, acc_id, text, report=True):
     display = me_info[0][0] if me_info else acc_id
     ok = fail = left = 0
     await uc.start()
-    async for dlg in uc.get_dialogs():
-        if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-            try:
-                await uc.send_message(dlg.chat.id, text)
-                ok += 1
-                await asyncio.sleep(2)
-            except (ChatWriteForbidden, ChatForbidden):
-                # ── گروه محدود/مسدود برای ارسال پیام → خروج خودکار ──
+    try:
+        async for dlg in uc.get_dialogs():
+            if dlg is None or dlg.chat is None:
+                continue
+            if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
                 try:
-                    await uc.leave_chat(dlg.chat.id)
-                    left += 1
+                    await uc.send_message(dlg.chat.id, text)
+                    ok += 1
+                    await asyncio.sleep(2)
+                except (ChatWriteForbidden, ChatForbidden):
+                    # ── گروه محدود/مسدود برای ارسال پیام → خروج خودکار ──
+                    try:
+                        await uc.leave_chat(dlg.chat.id)
+                        left += 1
+                    except Exception:
+                        fail += 1
                 except Exception:
                     fail += 1
-            except Exception:
-                fail += 1
+    except AttributeError:
+        pass
     await uc.stop()
     if report:
         await bot_client.send_message(
