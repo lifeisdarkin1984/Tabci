@@ -2,7 +2,7 @@ import asyncio, time
 from pyrogram import enums
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
 from database import q, u
-from utils import get_user_client, ADMIN_ID
+from utils import get_user_client, ADMIN_ID, report_flood
 
 async def run(bot_client):
     print("⏰ Global scheduler worker started")
@@ -30,22 +30,31 @@ async def run(bot_client):
                     try:
                         await uc.start()
                         if target == "pv":
+                            from pyrogram.errors import FloodWait
                             async for dlg in uc.get_dialogs():
                                 if dlg.chat.type != enums.ChatType.PRIVATE:
                                     continue
                                 try:
-                                    await uc.send_message(dlg.chat.id, text)
+                                    try:
+                                        await uc.send_message(dlg.chat.id, text)
+                                    except FloodWait as e:
+                                        await report_flood(bot_client, phone, "ارسال زمان‌بندی به پیوی‌ها", e)
+                                        await uc.send_message(dlg.chat.id, text)
                                     tot_ok += 1
                                     await asyncio.sleep(2)
                                 except Exception:
                                     tot_fail += 1
                         else:  # group
-                            from pyrogram.errors import ChatWriteForbidden, ChatForbidden
+                            from pyrogram.errors import ChatWriteForbidden, ChatForbidden, FloodWait
                             async for dlg in uc.get_dialogs():
                                 if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
                                     continue
                                 try:
-                                    await uc.send_message(dlg.chat.id, text)
+                                    try:
+                                        await uc.send_message(dlg.chat.id, text)
+                                    except FloodWait as e:
+                                        await report_flood(bot_client, phone, "ارسال زمان‌بندی به گروه‌ها", e)
+                                        await uc.send_message(dlg.chat.id, text)
                                     tot_ok += 1
                                     await asyncio.sleep(2)
                                 except (ChatWriteForbidden, ChatForbidden):
