@@ -30,7 +30,7 @@ async def main():
 
     await asyncio.gather(
         secretary.run(),
-        scheduler.run(),
+        scheduler.run(app),
         global_scheduler.run(app),
         idle(),
     )
