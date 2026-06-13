@@ -584,10 +584,9 @@ def register(app):
             elif d == "g_sgrp_go":
                 text = get_step_data(ADMIN_ID)
                 accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
-                for (aid,) in accs:
-                    asyncio.create_task(_send_to_groups(client, aid, text))
-                await cb.message.edit_text("✅ ارسال شروع شد.", reply_markup=global_kb())
+                await cb.message.edit_text("⏳ ارسال به گروه‌های همه اکانت‌ها شروع شد...", reply_markup=global_kb())
                 clear_step(ADMIN_ID)
+                asyncio.create_task(_send_to_groups_all(client, [a[0] for a in accs], text))
 
             elif d == "g_join":
                 set_step(ADMIN_ID, "g_join")
@@ -678,13 +677,28 @@ async def _send_to_pvs(bot_client, acc_id, text):
         f"✅ ارسال به پیوی‌ها تمام شد\n👤 {display}\n✔️ موفق: {ok}\n❌ ناموفق: {fail}"
     )
 
-async def _send_to_groups(bot_client, acc_id, text):
+async def _send_to_groups_all(bot_client, acc_ids, text):
+    tot_ok = tot_left = tot_fail = 0
+    for aid in acc_ids:
+        ok, left, fail = await _send_to_groups(bot_client, aid, text, report=False)
+        tot_ok += ok; tot_left += left; tot_fail += fail
+    await bot_client.send_message(
+        ADMIN_ID,
+        "✅ **ارسال به گروه‌های همه اکانت‌ها تمام شد**\n\n"
+        f"✔️ موفق: {tot_ok}\n"
+        f"🚫 محدود بود (پیام ارسال نشد) و خروج شد: {tot_left}\n"
+        f"⚠️ سایر موارد ناموفق (احتمالاً عضویت اجباری یا خطای دیگر): {tot_fail}"
+    )
+
+async def _send_to_groups(bot_client, acc_id, text, report=True):
     from pyrogram import enums
+    from pyrogram.errors import ChatWriteForbidden, ChatForbidden
     uc = await get_user_client(acc_id)
-    if not uc: return
+    if not uc:
+        return (0, 0, 0)
     me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
     display = me_info[0][0] if me_info else acc_id
-    ok = fail = 0
+    ok = fail = left = 0
     await uc.start()
     async for dlg in uc.get_dialogs():
         if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
@@ -692,10 +706,22 @@ async def _send_to_groups(bot_client, acc_id, text):
                 await uc.send_message(dlg.chat.id, text)
                 ok += 1
                 await asyncio.sleep(2)
+            except (ChatWriteForbidden, ChatForbidden):
+                # ── گروه محدود/مسدود برای ارسال پیام → خروج خودکار ──
+                try:
+                    await uc.leave_chat(dlg.chat.id)
+                    left += 1
+                except Exception:
+                    fail += 1
             except Exception:
                 fail += 1
     await uc.stop()
-    await bot_client.send_message(
-        ADMIN_ID,
-        f"✅ ارسال به گروه‌ها تمام شد\n👤 {display}\n✔️ موفق: {ok}\n❌ ناموفق: {fail}"
-    )
+    if report:
+        await bot_client.send_message(
+            ADMIN_ID,
+            f"✅ ارسال به گروه‌ها تمام شد\n👤 {display}\n"
+            f"✔️ موفق: {ok}\n"
+            f"🚫 محدود بود و خروج شد: {left}\n"
+            f"⚠️ سایر موارد ناموفق: {fail}"
+        )
+    return (ok, left, fail)
