@@ -91,16 +91,6 @@ def init_db():
             max_delay INT DEFAULT 420,
             force_join_active TINYINT DEFAULT 0
         )""",
-        """CREATE TABLE IF NOT EXISTS global_schedule (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            admin_id BIGINT,
-            target VARCHAR(10),
-            text MEDIUMTEXT,
-            interval_minutes INT DEFAULT 60,
-            last_run BIGINT DEFAULT 0,
-            is_active TINYINT DEFAULT 0,
-            UNIQUE KEY uniq_admin_target (admin_id, target)
-        )""",
     ]
     for s in stmts:
         cur.execute(s)

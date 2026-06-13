@@ -10,7 +10,7 @@ API_HASH  = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 from handlers import login, text_handler, callbacks
-from workers import secretary, scheduler, global_scheduler
+from workers import secretary, scheduler
 
 async def main():
     init_db()
@@ -31,7 +31,6 @@ async def main():
     await asyncio.gather(
         secretary.run(),
         scheduler.run(),
-        global_scheduler.run(app),
         idle(),
     )
 
