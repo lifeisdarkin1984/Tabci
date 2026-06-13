@@ -1,10 +1,10 @@
 import asyncio, time
 from pyrogram import enums
-from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired, FloodWait
+from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
 from database import q, u
-from utils import get_user_client, ADMIN_ID, report_flood
+from utils import get_user_client, ADMIN_ID
 
-async def run(bot_client):
+async def run():
     print("⏰ Scheduler worker started")
     while True:
         try:
@@ -30,8 +30,6 @@ async def run(bot_client):
                 uc = await get_user_client(acc_id)
                 if not uc:
                     continue
-                phone_row = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
-                display = phone_row[0][0] if phone_row else acc_id
                 try:
                     await uc.start()
                     async for dlg in uc.get_dialogs():
@@ -53,8 +51,6 @@ async def run(bot_client):
                                     elif bt:
                                         await uc.send_message(dlg.chat.id, bt)
                                     await asyncio.sleep(1)
-                        except FloodWait as e:
-                            await report_flood(bot_client, display, "ارسال زمان‌بندی", e)
                         except Exception:
                             pass
                     await uc.stop()
