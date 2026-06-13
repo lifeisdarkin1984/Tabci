@@ -1,4 +1,4 @@
-import os, time, asyncio
+import os, time
 from pyrogram import Client
 from database import q, u
 from dotenv import load_dotenv
@@ -38,25 +38,6 @@ async def get_user_client(acc_id):
         no_updates=True,
         in_memory=True
     )
-
-# ─── flood-wait helper ──────────────────────────────────────────
-async def report_flood(bot_client, acc_display, op_name, e):
-    """گزارش محدودیت تلگرام + برگرداندن مدت صبر امن"""
-    wait_s = e.value
-    safe_s = int(wait_s * 3.5)
-    try:
-        await bot_client.send_message(
-            ADMIN_ID,
-            f"❗️ عملیات {op_name} متوقف شد "
-            f"شما به محدودیت تلگرام خورده اید به مدت {wait_s} ثانیه\n\n"
-            f"جهت جلوگیری از مسدود شدن اکانت ربات پس از {safe_s} ثانیه "
-            f"دیگر به عملیات خود ادامه می دهد\n"
-            f"👤 اکانت : {acc_display}"
-        )
-    except Exception:
-        pass
-    await asyncio.sleep(safe_s)
-    return safe_s
 
 # ─── save account ──────────────────────────────────────────────
 def save_account(me, session_string, phone):
