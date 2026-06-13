@@ -169,13 +169,21 @@ def register(app):
                     me = await uc.get_me()
                     grps = chns = pvs = 0
                     from pyrogram import enums
-                    async for dialog in uc.get_dialogs():
-                        if dialog.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-                            grps += 1
-                        elif dialog.chat.type == enums.ChatType.CHANNEL:
-                            chns += 1
-                        elif dialog.chat.type == enums.ChatType.PRIVATE:
-                            pvs += 1
+                    try:
+                        async for dialog in uc.get_dialogs():
+                            try:
+                                if dialog is None or dialog.chat is None:
+                                    continue
+                                if dialog.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                                    grps += 1
+                                elif dialog.chat.type == enums.ChatType.CHANNEL:
+                                    chns += 1
+                                elif dialog.chat.type == enums.ChatType.PRIVATE:
+                                    pvs += 1
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
                     await uc.stop()
                     await cb.message.edit_text(
                         f"⚙️ به پنل مدیریت `{me.id}` خوش آمدید\n\n"
@@ -309,10 +317,26 @@ def register(app):
             # ══ استخراج لینک ══
             elif d.startswith("m_ext_"):
                 acc_id = d[6:]
+                await cb.message.edit_text(
+                    "🔗 **استخراج لینک**\n\nیکی از روش‌های زیر را انتخاب کنید:",
+                    reply_markup=ext_menu_kb(acc_id)
+                )
+
+            elif d.startswith("ext_single_"):
+                acc_id = d[11:]
                 set_step(ADMIN_ID, f"ext_ch_{acc_id}")
                 await cb.message.edit_text(
-                    "🔗 یوزرنیم کانال پابلیک را بفرستید:\nمثال: `@link4you`",
-                    reply_markup=back_kb(f"acc_manage_{acc_id}")
+                    "🔗 آیدی لینکدونی را بفرستید:\nمثال: `@link4you`",
+                    reply_markup=back_kb(f"m_ext_{acc_id}")
+                )
+
+            elif d.startswith("ext_multi_"):
+                acc_id = d[10:]
+                set_step(ADMIN_ID, f"extm_ch_{acc_id}")
+                await cb.message.edit_text(
+                    "🔗📚 آیدی لینکدونی‌ها را ارسال کنید (هر کدام در یک خط):\n\n"
+                    "مثال:\n`@link4you`\n`@channel2`\n`@channel3`",
+                    reply_markup=back_kb(f"m_ext_{acc_id}")
                 )
 
             # ══ لیست گروه‌ها ══
@@ -330,9 +354,17 @@ def register(app):
                 from pyrogram import enums
                 grps = 0
                 await uc.start()
-                async for dlg in uc.get_dialogs():
-                    if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-                        grps += 1
+                try:
+                    async for dlg in uc.get_dialogs():
+                        try:
+                            if dlg is None or dlg.chat is None:
+                                continue
+                            if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                                grps += 1
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
                 await uc.stop()
                 await cb.answer(f"👥 تعداد گروه‌ها: {grps}", show_alert=True)
 
@@ -345,13 +377,18 @@ def register(app):
                 from pyrogram.errors import ChatWriteForbidden
                 left = 0
                 await uc.start()
-                async for dlg in uc.get_dialogs():
-                    if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-                        try:
-                            await uc.send_message(dlg.chat.id, ".")
-                        except ChatWriteForbidden:
-                            await uc.leave_chat(dlg.chat.id)
-                            left += 1
+                try:
+                    async for dlg in uc.get_dialogs():
+                        if dlg is None or dlg.chat is None:
+                            continue
+                        if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                            try:
+                                await uc.send_message(dlg.chat.id, ".")
+                            except ChatWriteForbidden:
+                                await uc.leave_chat(dlg.chat.id)
+                                left += 1
+                except AttributeError:
+                    pass
                 await uc.stop()
                 await cb.answer(f"✅ از {left} گروه محدود خارج شد", show_alert=True)
 
@@ -375,13 +412,18 @@ def register(app):
                 from pyrogram import enums
                 count = 0
                 await uc.start()
-                async for dlg in uc.get_dialogs():
-                    if dlg.chat.type == enums.ChatType.PRIVATE:
-                        try:
-                            await uc.delete_history(dlg.chat.id, revoke=True)
-                            count += 1
-                        except Exception:
-                            pass
+                try:
+                    async for dlg in uc.get_dialogs():
+                        if dlg is None or dlg.chat is None:
+                            continue
+                        if dlg.chat.type == enums.ChatType.PRIVATE:
+                            try:
+                                await uc.delete_history(dlg.chat.id, revoke=True)
+                                count += 1
+                            except Exception:
+                                pass
+                except AttributeError:
+                    pass
                 await uc.stop()
                 await cb.message.edit_text(f"✅ {count} پیوی حذف شد.",
                                             reply_markup=back_kb(f"acc_manage_{acc_id}"))
@@ -475,14 +517,19 @@ def register(app):
                 from pyrogram import enums
                 count = 0
                 await uc.start()
-                async for dlg in uc.get_dialogs():
-                    if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP, enums.ChatType.CHANNEL):
-                        try:
-                            await uc.leave_chat(dlg.chat.id)
-                            count += 1
-                            await asyncio.sleep(0.5)
-                        except Exception:
-                            pass
+                try:
+                    async for dlg in uc.get_dialogs():
+                        if dlg is None or dlg.chat is None:
+                            continue
+                        if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP, enums.ChatType.CHANNEL):
+                            try:
+                                await uc.leave_chat(dlg.chat.id)
+                                count += 1
+                                await asyncio.sleep(0.5)
+                            except Exception:
+                                pass
+                except AttributeError:
+                    pass
                 await uc.stop()
                 await cb.message.edit_text(f"✅ از {count} گروه و کانال خارج شد.",
                                             reply_markup=back_kb(f"acc_manage_{acc_id}"))
@@ -568,10 +615,9 @@ def register(app):
             elif d == "g_sgrp_go":
                 text = get_step_data(ADMIN_ID)
                 accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
-                for (aid,) in accs:
-                    asyncio.create_task(_send_to_groups(client, aid, text))
-                await cb.message.edit_text("✅ ارسال شروع شد.", reply_markup=global_kb())
+                await cb.message.edit_text("⏳ ارسال به گروه‌های همه اکانت‌ها شروع شد...", reply_markup=global_kb())
                 clear_step(ADMIN_ID)
+                asyncio.create_task(_send_to_groups_all(client, [a[0] for a in accs], text))
 
             elif d == "g_join":
                 set_step(ADMIN_ID, "g_join")
@@ -612,9 +658,52 @@ def register(app):
                       "VALUES(%s,%s,1) ON DUPLICATE KEY UPDATE force_join_active=1", (aid, ADMIN_ID))
                 await cb.answer("✅ عضویت اجبار برای همه فعال شد", show_alert=True)
 
-            elif d == "g_sch":
-                await cb.message.edit_text("⏰ پنل ارسال زمان‌دار همگانی\n\nاز لیست تبچی اکانت مورد نظر را انتخاب و زمان‌بند را تنظیم کنید.",
-                                            reply_markup=back_kb("menu_global"))
+            elif d in ("gsch_pv", "gsch_grp"):
+                target = "pv" if d == "gsch_pv" else "group"
+                row = q("SELECT text,interval_minutes,is_active FROM global_schedule WHERE admin_id=%s AND target=%s",
+                        (ADMIN_ID, target))
+                txt, interval, active = (row[0] if row else ("", 60, 0))
+                label = "پی‌وی‌ها" if target == "pv" else "گروه‌ها"
+                await cb.message.edit_text(
+                    f"⏰ **ارسال زمان‌بندی به {label}**\n\n"
+                    f"📝 متن فعلی: {txt or '—'}\n"
+                    f"⏱ فاصله ارسال: هر {interval} دقیقه\n"
+                    f"وضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n\n"
+                    "ابتدا متن و زمان را تنظیم کنید سپس روشن کنید.",
+                    reply_markup=global_schedule_kb(target, active, interval)
+                )
+
+            elif d.startswith("gsch_text_"):
+                target = d[10:]
+                panel_cb = "gsch_pv" if target == "pv" else "gsch_grp"
+                set_step(ADMIN_ID, f"gsch_text_{target}")
+                await cb.message.edit_text(
+                    "📝 متنی که باید طبق زمان‌بندی ارسال شود را بفرستید:",
+                    reply_markup=back_kb(panel_cb)
+                )
+
+            elif d.startswith("gsch_int_"):
+                target = d[9:]
+                panel_cb = "gsch_pv" if target == "pv" else "gsch_grp"
+                set_step(ADMIN_ID, f"gsch_int_{target}")
+                await cb.message.edit_text(
+                    "⏱ فاصله ارسال را به دقیقه وارد کنید:\nمثال: `60`",
+                    reply_markup=back_kb(panel_cb)
+                )
+
+            elif d.startswith("gsch_tog_"):
+                target = d[9:]
+                cur_row = q("SELECT text,interval_minutes,is_active FROM global_schedule WHERE admin_id=%s AND target=%s",
+                             (ADMIN_ID, target))
+                txt, interval, active = (cur_row[0] if cur_row else ("", 60, 0))
+                if not active and not txt:
+                    await cb.answer("⚠️ ابتدا متن را تنظیم کنید", show_alert=True)
+                    return
+                new = 0 if active else 1
+                u("INSERT INTO global_schedule (admin_id,target,interval_minutes,is_active) VALUES(%s,%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, target, interval, new, new))
+                await cb.answer(f"زمان‌بندی {'فعال' if new else 'غیرفعال'} شد")
+                await cb.message.edit_reply_markup(global_schedule_kb(target, new, interval))
 
             elif d == "g_fwdgrp":
                 set_step(ADMIN_ID, "g_fwdgrp")
@@ -648,38 +737,75 @@ async def _send_to_pvs(bot_client, acc_id, text):
     display = me_info[0][0] if me_info else acc_id
     ok = fail = 0
     await uc.start()
-    async for dlg in uc.get_dialogs():
-        if dlg.chat.type == enums.ChatType.PRIVATE:
-            try:
-                await uc.send_message(dlg.chat.id, text)
-                ok += 1
-                await asyncio.sleep(2)
-            except Exception:
-                fail += 1
+    try:
+        async for dlg in uc.get_dialogs():
+            if dlg is None or dlg.chat is None:
+                continue
+            if dlg.chat.type == enums.ChatType.PRIVATE:
+                try:
+                    await uc.send_message(dlg.chat.id, text)
+                    ok += 1
+                    await asyncio.sleep(2)
+                except Exception:
+                    fail += 1
+    except AttributeError:
+        pass
     await uc.stop()
     await bot_client.send_message(
         ADMIN_ID,
         f"✅ ارسال به پیوی‌ها تمام شد\n👤 {display}\n✔️ موفق: {ok}\n❌ ناموفق: {fail}"
     )
 
-async def _send_to_groups(bot_client, acc_id, text):
-    from pyrogram import enums
-    uc = await get_user_client(acc_id)
-    if not uc: return
-    me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
-    display = me_info[0][0] if me_info else acc_id
-    ok = fail = 0
-    await uc.start()
-    async for dlg in uc.get_dialogs():
-        if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-            try:
-                await uc.send_message(dlg.chat.id, text)
-                ok += 1
-                await asyncio.sleep(2)
-            except Exception:
-                fail += 1
-    await uc.stop()
+async def _send_to_groups_all(bot_client, acc_ids, text):
+    tot_ok = tot_left = tot_fail = 0
+    for aid in acc_ids:
+        ok, left, fail = await _send_to_groups(bot_client, aid, text, report=False)
+        tot_ok += ok; tot_left += left; tot_fail += fail
     await bot_client.send_message(
         ADMIN_ID,
-        f"✅ ارسال به گروه‌ها تمام شد\n👤 {display}\n✔️ موفق: {ok}\n❌ ناموفق: {fail}"
+        "✅ **ارسال به گروه‌های همه اکانت‌ها تمام شد**\n\n"
+        f"✔️ موفق: {tot_ok}\n"
+        f"🚫 محدود بود (پیام ارسال نشد) و خروج شد: {tot_left}\n"
+        f"⚠️ سایر موارد ناموفق (احتمالاً عضویت اجباری یا خطای دیگر): {tot_fail}"
     )
+
+async def _send_to_groups(bot_client, acc_id, text, report=True):
+    from pyrogram import enums
+    from pyrogram.errors import ChatWriteForbidden, ChatForbidden
+    uc = await get_user_client(acc_id)
+    if not uc:
+        return (0, 0, 0)
+    me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
+    display = me_info[0][0] if me_info else acc_id
+    ok = fail = left = 0
+    await uc.start()
+    try:
+        async for dlg in uc.get_dialogs():
+            if dlg is None or dlg.chat is None:
+                continue
+            if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                try:
+                    await uc.send_message(dlg.chat.id, text)
+                    ok += 1
+                    await asyncio.sleep(2)
+                except (ChatWriteForbidden, ChatForbidden):
+                    # ── گروه محدود/مسدود برای ارسال پیام → خروج خودکار ──
+                    try:
+                        await uc.leave_chat(dlg.chat.id)
+                        left += 1
+                    except Exception:
+                        fail += 1
+                except Exception:
+                    fail += 1
+    except AttributeError:
+        pass
+    await uc.stop()
+    if report:
+        await bot_client.send_message(
+            ADMIN_ID,
+            f"✅ ارسال به گروه‌ها تمام شد\n👤 {display}\n"
+            f"✔️ موفق: {ok}\n"
+            f"🚫 محدود بود و خروج شد: {left}\n"
+            f"⚠️ سایر موارد ناموفق: {fail}"
+        )
+    return (ok, left, fail)
