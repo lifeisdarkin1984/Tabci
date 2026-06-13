@@ -3,7 +3,7 @@ from pyrogram import filters
 from pyrogram.types import CallbackQuery
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
-                   clear_step, get_user_client, report_flood)
+                   clear_step, get_user_client)
 from keyboards import *
 
 def register(app):
@@ -700,7 +700,6 @@ async def _join_task(bot_client, acc_id, links, mn, mx):
 
 async def _send_to_pvs(bot_client, acc_id, text):
     from pyrogram import enums
-    from pyrogram.errors import FloodWait
     uc = await get_user_client(acc_id)
     if not uc: return
     me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
@@ -710,11 +709,7 @@ async def _send_to_pvs(bot_client, acc_id, text):
     async for dlg in uc.get_dialogs():
         if dlg.chat.type == enums.ChatType.PRIVATE:
             try:
-                try:
-                    await uc.send_message(dlg.chat.id, text)
-                except FloodWait as e:
-                    await report_flood(bot_client, display, "ارسال به پیوی‌ها", e)
-                    await uc.send_message(dlg.chat.id, text)
+                await uc.send_message(dlg.chat.id, text)
                 ok += 1
                 await asyncio.sleep(2)
             except Exception:
@@ -740,7 +735,7 @@ async def _send_to_groups_all(bot_client, acc_ids, text):
 
 async def _send_to_groups(bot_client, acc_id, text, report=True):
     from pyrogram import enums
-    from pyrogram.errors import ChatWriteForbidden, ChatForbidden, FloodWait
+    from pyrogram.errors import ChatWriteForbidden, ChatForbidden
     uc = await get_user_client(acc_id)
     if not uc:
         return (0, 0, 0)
@@ -751,11 +746,7 @@ async def _send_to_groups(bot_client, acc_id, text, report=True):
     async for dlg in uc.get_dialogs():
         if dlg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
             try:
-                try:
-                    await uc.send_message(dlg.chat.id, text)
-                except FloodWait as e:
-                    await report_flood(bot_client, display, "ارسال به گروه‌ها", e)
-                    await uc.send_message(dlg.chat.id, text)
+                await uc.send_message(dlg.chat.id, text)
                 ok += 1
                 await asyncio.sleep(2)
             except (ChatWriteForbidden, ChatForbidden):
