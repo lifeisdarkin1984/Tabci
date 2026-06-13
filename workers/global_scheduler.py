@@ -29,11 +29,19 @@ async def run(bot_client):
                         continue
                     try:
                         await uc.start()
-                        if target == "pv":
+                        dialogs = []
+                        try:
                             async for dlg in uc.get_dialogs():
-                                if dlg.chat.type != enums.ChatType.PRIVATE:
-                                    continue
+                                if dlg is not None and dlg.chat is not None:
+                                    dialogs.append(dlg)
+                        except Exception as e:
+                            print(f"[GlobalScheduler] خطا در get_dialogs اکانت {acc_id}: {e}")
+
+                        if target == "pv":
+                            for dlg in dialogs:
                                 try:
+                                    if dlg.chat.type != enums.ChatType.PRIVATE:
+                                        continue
                                     await uc.send_message(dlg.chat.id, text)
                                     tot_ok += 1
                                     await asyncio.sleep(2)
@@ -41,10 +49,10 @@ async def run(bot_client):
                                     tot_fail += 1
                         else:  # group
                             from pyrogram.errors import ChatWriteForbidden, ChatForbidden
-                            async for dlg in uc.get_dialogs():
-                                if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-                                    continue
+                            for dlg in dialogs:
                                 try:
+                                    if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                                        continue
                                     await uc.send_message(dlg.chat.id, text)
                                     tot_ok += 1
                                     await asyncio.sleep(2)
@@ -56,6 +64,7 @@ async def run(bot_client):
                                         tot_fail += 1
                                 except Exception:
                                     tot_fail += 1
+
                         await uc.stop()
                     except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
                         u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
