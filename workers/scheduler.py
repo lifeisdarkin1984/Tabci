@@ -32,39 +32,27 @@ async def run():
                     continue
                 try:
                     await uc.start()
-                    dialogs = []
-                    try:
-                        async for dlg in uc.get_dialogs():
-                            if dlg is not None and dlg.chat is not None:
-                                dialogs.append(dlg)
-                    except Exception as e:
-                        print(f"[Scheduler] خطا در get_dialogs اکانت {acc_id}: {e}")
-
-                    for dlg in dialogs:
+                    async for dlg in uc.get_dialogs():
+                        if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                            continue
                         try:
-                            if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
-                                continue
-                            try:
-                                if mode == "forward" and fwd_chat and fwd_id:
-                                    await uc.forward_messages(dlg.chat.id, fwd_chat, fwd_id)
-                                else:
-                                    for b in (bnrs or [(txt, fid, ftype)]):
-                                        bt, bf, bft = b
-                                        if bf:
-                                            if bft == "photo":
-                                                await uc.send_photo(dlg.chat.id, bf, caption=bt)
-                                            elif bft == "video":
-                                                await uc.send_video(dlg.chat.id, bf, caption=bt)
-                                            else:
-                                                await uc.send_document(dlg.chat.id, bf, caption=bt)
-                                        elif bt:
-                                            await uc.send_message(dlg.chat.id, bt)
-                                        await asyncio.sleep(1)
-                            except Exception:
-                                pass
+                            if mode == "forward" and fwd_chat and fwd_id:
+                                await uc.forward_messages(dlg.chat.id, fwd_chat, fwd_id)
+                            else:
+                                for b in (bnrs or [(txt, fid, ftype)]):
+                                    bt, bf, bft = b
+                                    if bf:
+                                        if bft == "photo":
+                                            await uc.send_photo(dlg.chat.id, bf, caption=bt)
+                                        elif bft == "video":
+                                            await uc.send_video(dlg.chat.id, bf, caption=bt)
+                                        else:
+                                            await uc.send_document(dlg.chat.id, bf, caption=bt)
+                                    elif bt:
+                                        await uc.send_message(dlg.chat.id, bt)
+                                    await asyncio.sleep(1)
                         except Exception:
                             pass
-
                     await uc.stop()
                     u("UPDATE scheduler SET last_run=%s WHERE account_id=%s", (now, acc_id))
                 except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
