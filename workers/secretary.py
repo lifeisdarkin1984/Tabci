@@ -30,6 +30,8 @@ async def run():
                 try:
                     await uc.start()
                     async for dlg in uc.get_dialogs():
+                        if dlg is None or dlg.chat is None:
+                            continue
                         if dlg.chat.type != enums.ChatType.PRIVATE:
                             continue
                         uid = str(dlg.chat.id)
