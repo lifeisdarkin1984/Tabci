@@ -80,6 +80,15 @@ def scheduler_kb(acc_id, active):
         [InlineKeyboardButton("🔙 بازگشت",               callback_data=f"acc_manage_{acc_id}")],
     ])
 
+def global_schedule_kb(target, active, interval):
+    lbl = "🔴 خاموش کردن" if active else "🟢 روشن کردن"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 تنظیم متن", callback_data=f"gsch_text_{target}")],
+        [InlineKeyboardButton(f"⏱ تنظیم زمان (هر {interval} دقیقه)", callback_data=f"gsch_int_{target}")],
+        [InlineKeyboardButton(lbl, callback_data=f"gsch_tog_{target}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
+    ])
+
 def global_secretary_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 پیام اول", callback_data="sec_b1_global"),
@@ -93,7 +102,8 @@ def global_secretary_kb():
 def global_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🤖 منشی خودکار همگانی",        callback_data="g_sec")],
-        [InlineKeyboardButton("⏰ ارسال زمان‌دار",           callback_data="g_sch")],
+        [InlineKeyboardButton("⏰ ارسال زمان‌بندی به پی‌وی‌ها", callback_data="gsch_pv")],
+        [InlineKeyboardButton("⏰ ارسال زمان‌بندی به گروه‌ها", callback_data="gsch_grp")],
         [InlineKeyboardButton("➕ عضو شدن در لیست گروه‌ها", callback_data="g_join")],
         [InlineKeyboardButton("🕵️ عضویت اجبار گروه‌ها",     callback_data="g_fj")],
         [InlineKeyboardButton("📤 فوروارد سریع به گروه‌ها", callback_data="g_fwdgrp"),
