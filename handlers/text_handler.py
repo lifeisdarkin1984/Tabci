@@ -129,7 +129,33 @@ def register(app):
                 reply_markup=back_kb(f"m_ext_{acc_id}")
             )
 
-        # ══ استخراج لینک - تعداد ══
+        # ══ ارسال زمان‌بندی همگانی - متن ══
+        elif step.startswith("gsch_text_"):
+            target = step[10:]
+            panel_cb = "gsch_pv" if target == "pv" else "gsch_grp"
+            row = q("SELECT interval_minutes,is_active FROM global_schedule WHERE admin_id=%s AND target=%s",
+                    (ADMIN_ID, target))
+            interval, active = (row[0] if row else (60, 0))
+            u("INSERT INTO global_schedule (admin_id,target,text,interval_minutes,is_active) VALUES(%s,%s,%s,%s,%s) "
+              "ON DUPLICATE KEY UPDATE text=%s", (ADMIN_ID, target, text, interval, active, text))
+            from keyboards import global_schedule_kb
+            await message.reply("✅ متن ذخیره شد.", reply_markup=global_schedule_kb(target, active, interval))
+            clear_step(ADMIN_ID)
+
+        # ══ ارسال زمان‌بندی همگانی - فاصله زمانی ══
+        elif step.startswith("gsch_int_"):
+            target = step[9:]
+            if not text.isdigit() or not (1 <= int(text) <= 1440):
+                await message.reply("❌ عدد باید بین ۱ تا ۱۴۴۰ دقیقه باشد.")
+                return
+            row = q("SELECT text,is_active FROM global_schedule WHERE admin_id=%s AND target=%s",
+                    (ADMIN_ID, target))
+            txt, active = (row[0] if row else ("", 0))
+            u("INSERT INTO global_schedule (admin_id,target,text,interval_minutes,is_active) VALUES(%s,%s,%s,%s,%s) "
+              "ON DUPLICATE KEY UPDATE interval_minutes=%s", (ADMIN_ID, target, txt, int(text), active, int(text)))
+            from keyboards import global_schedule_kb
+            await message.reply("✅ فاصله زمانی ذخیره شد.", reply_markup=global_schedule_kb(target, active, int(text)))
+            clear_step(ADMIN_ID)
         elif step.startswith("ext_cnt_"):
             acc_id = step[8:]
             ch = get_step_data(ADMIN_ID)
