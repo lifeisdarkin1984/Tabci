@@ -129,33 +129,7 @@ def register(app):
                 reply_markup=back_kb(f"m_ext_{acc_id}")
             )
 
-        # ══ ارسال زمان‌بندی همگانی - متن ══
-        elif step.startswith("gsch_text_"):
-            target = step[10:]
-            panel_cb = "gsch_pv" if target == "pv" else "gsch_grp"
-            row = q("SELECT interval_minutes,is_active FROM global_schedule WHERE admin_id=%s AND target=%s",
-                    (ADMIN_ID, target))
-            interval, active = (row[0] if row else (60, 0))
-            u("INSERT INTO global_schedule (admin_id,target,text,interval_minutes,is_active) VALUES(%s,%s,%s,%s,%s) "
-              "ON DUPLICATE KEY UPDATE text=%s", (ADMIN_ID, target, text, interval, active, text))
-            from keyboards import global_schedule_kb
-            await message.reply("✅ متن ذخیره شد.", reply_markup=global_schedule_kb(target, active, interval))
-            clear_step(ADMIN_ID)
-
-        # ══ ارسال زمان‌بندی همگانی - فاصله زمانی ══
-        elif step.startswith("gsch_int_"):
-            target = step[9:]
-            if not text.isdigit() or not (1 <= int(text) <= 1440):
-                await message.reply("❌ عدد باید بین ۱ تا ۱۴۴۰ دقیقه باشد.")
-                return
-            row = q("SELECT text,is_active FROM global_schedule WHERE admin_id=%s AND target=%s",
-                    (ADMIN_ID, target))
-            txt, active = (row[0] if row else ("", 0))
-            u("INSERT INTO global_schedule (admin_id,target,text,interval_minutes,is_active) VALUES(%s,%s,%s,%s,%s) "
-              "ON DUPLICATE KEY UPDATE interval_minutes=%s", (ADMIN_ID, target, txt, int(text), active, int(text)))
-            from keyboards import global_schedule_kb
-            await message.reply("✅ فاصله زمانی ذخیره شد.", reply_markup=global_schedule_kb(target, active, int(text)))
-            clear_step(ADMIN_ID)
+        # ══ استخراج لینک - تعداد ══
         elif step.startswith("ext_cnt_"):
             acc_id = step[8:]
             ch = get_step_data(ADMIN_ID)
@@ -169,46 +143,6 @@ def register(app):
             else:
                 out = "\n".join(links)
                 # اگه طولانی بود تقسیم کن
-                if len(out) > 4000:
-                    chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
-                    for ch_txt in chunks:
-                        await message.reply(ch_txt)
-                    await msg.delete()
-                else:
-                    await msg.edit_text(out)
-            clear_step(ADMIN_ID)
-
-        # ══ استخراج لینک از چند لینکدونی - آیدی‌ها ══
-        elif step.startswith("extm_ch_"):
-            acc_id = step[8:]
-            channels = [c.strip() for c in text.splitlines() if c.strip()]
-            if not channels:
-                await message.reply("❌ حداقل یک آیدی لینکدونی وارد کنید.")
-                return
-            set_step(ADMIN_ID, f"extm_cnt_{acc_id}", "\n".join(channels))
-            await message.reply(
-                f"✅ {len(channels)} لینکدونی ثبت شد.\n\n"
-                "حالا تعداد لینک‌های آخر هر لینکدونی که باید استخراج شود را بفرستید:\n\n"
-                "📩 حداقل ۱ و حداکثر ۵۰\n\nعدد مورد نظر را ارسال کنید:",
-                reply_markup=back_kb(f"m_ext_{acc_id}")
-            )
-
-        # ══ استخراج لینک از چند لینکدونی - تعداد ══
-        elif step.startswith("extm_cnt_"):
-            acc_id = step[9:]
-            channels = [c.strip() for c in get_step_data(ADMIN_ID).splitlines() if c.strip()]
-            if not text.isdigit() or not (1 <= int(text) <= 50):
-                await message.reply("❌ عدد باید بین ۱ تا ۵۰ باشد.")
-                return
-            n = int(text)
-            msg = await message.reply("⏳ در حال استخراج لینک‌ها...")
-            all_links = []
-            for ch in channels:
-                all_links += await _extract_n_links(acc_id, ch, n)
-            if not all_links:
-                await msg.edit_text("🔍 لینکی یافت نشد.")
-            else:
-                out = "\n".join(all_links)
                 if len(out) > 4000:
                     chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
                     for ch_txt in chunks:
@@ -396,29 +330,6 @@ async def _extract_links(acc_id, channel, limit):
     except Exception:
         pass
     return list(dict.fromkeys(links))
-
-async def _extract_n_links(acc_id, channel, n, scan_limit=500):
-    """آخرین n لینک یکتا را از یک لینکدونی استخراج می‌کند."""
-    uc = await get_user_client(acc_id)
-    if not uc:
-        return []
-    pattern = re.compile(r'(https?://t\.me/\S+|@[\w]{4,})')
-    links = []
-    try:
-        await uc.start()
-        async for msg in uc.get_chat_history(channel, limit=scan_limit):
-            txt = (msg.text or "") + " " + (msg.caption or "")
-            for l in pattern.findall(txt):
-                if l not in links:
-                    links.append(l)
-                    if len(links) >= n:
-                        break
-            if len(links) >= n:
-                break
-        await uc.stop()
-    except Exception:
-        pass
-    return links
 
 async def _join_links(bot_client, acc_id, links, min_d, max_d):
     uc = await get_user_client(acc_id)
