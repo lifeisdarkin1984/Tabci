@@ -29,32 +29,42 @@ async def run():
                     continue
                 try:
                     await uc.start()
-                    async for dlg in uc.get_dialogs():
-                        if dlg is None or dlg.chat is None:
-                            continue
-                        if dlg.chat.type != enums.ChatType.PRIVATE:
-                            continue
-                        uid = str(dlg.chat.id)
-                        if uid in replied:
-                            continue
-                        async for msg in uc.get_chat_history(dlg.chat.id, limit=1):
-                            if msg.from_user and str(msg.from_user.id) == uid:
-                                for b in banners:
-                                    txt, fid, ftype = b
-                                    try:
-                                        if fid:
-                                            if ftype == "photo":
-                                                await uc.send_photo(dlg.chat.id, fid, caption=txt)
-                                            elif ftype == "video":
-                                                await uc.send_video(dlg.chat.id, fid, caption=txt)
+                    dialogs = []
+                    try:
+                        async for dlg in uc.get_dialogs():
+                            if dlg is not None and dlg.chat is not None:
+                                dialogs.append(dlg)
+                    except Exception as e:
+                        print(f"[Secretary] خطا در get_dialogs اکانت {acc_id}: {e}")
+
+                    for dlg in dialogs:
+                        try:
+                            if dlg.chat.type != enums.ChatType.PRIVATE:
+                                continue
+                            uid = str(dlg.chat.id)
+                            if uid in replied:
+                                continue
+                            async for msg in uc.get_chat_history(dlg.chat.id, limit=1):
+                                if msg.from_user and str(msg.from_user.id) == uid:
+                                    for b in banners:
+                                        txt, fid, ftype = b
+                                        try:
+                                            if fid:
+                                                if ftype == "photo":
+                                                    await uc.send_photo(dlg.chat.id, fid, caption=txt)
+                                                elif ftype == "video":
+                                                    await uc.send_video(dlg.chat.id, fid, caption=txt)
+                                                else:
+                                                    await uc.send_document(dlg.chat.id, fid, caption=txt)
                                             else:
-                                                await uc.send_document(dlg.chat.id, fid, caption=txt)
-                                        else:
-                                            await uc.send_message(dlg.chat.id, txt)
-                                        await asyncio.sleep(2)
-                                    except Exception:
-                                        pass
-                                replied.add(uid)
+                                                await uc.send_message(dlg.chat.id, txt)
+                                            await asyncio.sleep(2)
+                                        except Exception:
+                                            pass
+                                    replied.add(uid)
+                        except Exception:
+                            pass
+
                     await uc.stop()
                     u("UPDATE secretary SET replied_users=%s WHERE account_id=%s",
                       (",".join(replied), acc_id))
