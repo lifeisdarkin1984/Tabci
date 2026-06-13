@@ -627,9 +627,52 @@ def register(app):
                       "VALUES(%s,%s,1) ON DUPLICATE KEY UPDATE force_join_active=1", (aid, ADMIN_ID))
                 await cb.answer("✅ عضویت اجبار برای همه فعال شد", show_alert=True)
 
-            elif d == "g_sch":
-                await cb.message.edit_text("⏰ پنل ارسال زمان‌دار همگانی\n\nاز لیست تبچی اکانت مورد نظر را انتخاب و زمان‌بند را تنظیم کنید.",
-                                            reply_markup=back_kb("menu_global"))
+            elif d in ("gsch_pv", "gsch_grp"):
+                target = "pv" if d == "gsch_pv" else "group"
+                row = q("SELECT text,interval_minutes,is_active FROM global_schedule WHERE admin_id=%s AND target=%s",
+                        (ADMIN_ID, target))
+                txt, interval, active = (row[0] if row else ("", 60, 0))
+                label = "پی‌وی‌ها" if target == "pv" else "گروه‌ها"
+                await cb.message.edit_text(
+                    f"⏰ **ارسال زمان‌بندی به {label}**\n\n"
+                    f"📝 متن فعلی: {txt or '—'}\n"
+                    f"⏱ فاصله ارسال: هر {interval} دقیقه\n"
+                    f"وضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n\n"
+                    "ابتدا متن و زمان را تنظیم کنید سپس روشن کنید.",
+                    reply_markup=global_schedule_kb(target, active, interval)
+                )
+
+            elif d.startswith("gsch_text_"):
+                target = d[10:]
+                panel_cb = "gsch_pv" if target == "pv" else "gsch_grp"
+                set_step(ADMIN_ID, f"gsch_text_{target}")
+                await cb.message.edit_text(
+                    "📝 متنی که باید طبق زمان‌بندی ارسال شود را بفرستید:",
+                    reply_markup=back_kb(panel_cb)
+                )
+
+            elif d.startswith("gsch_int_"):
+                target = d[9:]
+                panel_cb = "gsch_pv" if target == "pv" else "gsch_grp"
+                set_step(ADMIN_ID, f"gsch_int_{target}")
+                await cb.message.edit_text(
+                    "⏱ فاصله ارسال را به دقیقه وارد کنید:\nمثال: `60`",
+                    reply_markup=back_kb(panel_cb)
+                )
+
+            elif d.startswith("gsch_tog_"):
+                target = d[9:]
+                cur_row = q("SELECT text,interval_minutes,is_active FROM global_schedule WHERE admin_id=%s AND target=%s",
+                             (ADMIN_ID, target))
+                txt, interval, active = (cur_row[0] if cur_row else ("", 60, 0))
+                if not active and not txt:
+                    await cb.answer("⚠️ ابتدا متن را تنظیم کنید", show_alert=True)
+                    return
+                new = 0 if active else 1
+                u("INSERT INTO global_schedule (admin_id,target,interval_minutes,is_active) VALUES(%s,%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, target, interval, new, new))
+                await cb.answer(f"زمان‌بندی {'فعال' if new else 'غیرفعال'} شد")
+                await cb.message.edit_reply_markup(global_schedule_kb(target, new, interval))
 
             elif d == "g_fwdgrp":
                 set_step(ADMIN_ID, "g_fwdgrp")
