@@ -26,9 +26,9 @@ async def main():
     )
 
     login.register(app)
+    assistant.register(app)
     text_handler.register(app)
     callbacks.register(app)
-    assistant.register(app)
 
     await app.start()
     print("✅ Tabchi Personal bot is running...")
