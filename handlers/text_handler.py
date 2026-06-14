@@ -79,8 +79,8 @@ def register(app):
             clear_step(ADMIN_ID)
 
         elif step.startswith("bn_text_"):
-            parts = step.split("_")
-            acc_id, slot, ctx = parts[2], int(parts[3]), parts[4]
+            _, _, acc_id, slot, ctx = step.split("_", 4)
+            slot = int(slot)
             set_step(ADMIN_ID, f"bn_file_{acc_id}_{slot}_{ctx}", text)
             u("INSERT INTO banners (account_id,admin_id,slot,text,context) "
               "VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE text=%s",
@@ -284,8 +284,8 @@ def register(app):
         step = get_step(ADMIN_ID)
         if not step.startswith("bn_file_"):
             return
-        parts = step.split("_")
-        acc_id, slot, ctx = parts[2], int(parts[3]), parts[4]
+        _, _, acc_id, slot, ctx = step.split("_", 4)
+        slot = int(slot)
         if message.photo:
             fid, ftype = message.photo.file_id, "photo"
         elif message.video:
