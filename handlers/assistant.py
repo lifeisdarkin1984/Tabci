@@ -6,16 +6,17 @@ import urllib.error
 from database import q
 from utils import ADMIN_ID, get_user_client, get_step, set_step, clear_step
 
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
 SYSTEM_PROMPT = """تو دستیار هوشمند مدیریت تبچی هستی.
 اطلاعات اکانت‌ها و وضعیت سرویس‌ها رو داری.
-جواب‌ها کوتاه، مفید و به فارسی باشن."""
+قوانین:
+- سوال‌های آماری رو مستقیم و کوتاه جواب بده
+- برای عملیات مهم (ارسال پیام، خاموش کردن سرویس) بگو "تایید کنید: [عملیات]"
+- پیام‌های پیوی رو فقط خلاصه کن، عین متن رو نقل نکن
+- جواب‌ها کوتاه، مفید و به فارسی باشن
+- اگه اطلاعات کافی نداری صادقانه بگو"""
 
-MODELS = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-pro",
-]
 
 async def _build_context():
     accs = q("SELECT id,phone,name,status FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
@@ -35,41 +36,63 @@ async def _build_context():
     return "\n".join(lines)
 
 
-async def _call_gemini(user_msg: str, context: str) -> str:
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+async def _read_pvs(acc_id, limit=10):
+    from pyrogram import enums as en
+    uc = await get_user_client(acc_id)
+    if not uc:
+        return "اکانت در دسترس نیست"
+    results = []
+    try:
+        await uc.start()
+        async for dlg in uc.get_dialogs():
+            if dlg.chat.type == en.ChatType.PRIVATE:
+                name = dlg.chat.first_name or str(dlg.chat.id)
+                last = dlg.top_message.text[:50] if dlg.top_message and dlg.top_message.text else "..."
+                results.append(f"{name}: {last}")
+                if len(results) >= limit:
+                    break
+        await uc.stop()
+    except Exception as e:
+        return f"خطا: {e}"
+    return "\n".join(results) if results else "پیوی‌ای یافت نشد"
+
+
+async def _call_groq(user_msg: str, context: str) -> str:
+    api_key = os.environ.get("GROQ_API_KEY", "")
     if not api_key:
-        return "❌ GEMINI_API_KEY تنظیم نشده در Railway."
+        return "❌ GROQ_API_KEY تنظیم نشده در Railway."
 
     payload = json.dumps({
-        "contents": [{"parts": [{"text": f"{SYSTEM_PROMPT}\n\nاطلاعات:\n{context}\n\nسوال: {user_msg}"}]}],
-        "generationConfig": {"maxOutputTokens": 500, "temperature": 0.3}
+        "model": "llama-3.1-8b-instant",
+        "messages": [
+            {"role": "system", "content": f"{SYSTEM_PROMPT}\n\nاطلاعات فعلی:\n{context}"},
+            {"role": "user", "content": user_msg}
+        ],
+        "max_tokens": 500,
+        "temperature": 0.3
     }).encode()
 
-    errors = []
-    for model in MODELS:
-        for use_header in [True, False]:
-            try:
-                if use_header:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-                    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
-                else:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-                    headers = {"Content-Type": "application/json"}
-
-                req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-                loop = asyncio.get_event_loop()
-                def do_req(r=req):
-                    with urllib.request.urlopen(r, timeout=15) as resp:
-                        return json.loads(resp.read())
-                data = await loop.run_in_executor(None, do_req)
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-            except urllib.error.HTTPError as e:
-                body = e.read().decode()[:150]
-                errors.append(f"{model}({'H' if use_header else 'Q'}): {e.code} {body}")
-            except Exception as e:
-                errors.append(f"{model}({'H' if use_header else 'Q'}): {type(e).__name__}: {str(e)[:80]}")
-
-    return "❌ همه مدل‌ها ناموفق:\n" + "\n".join(errors)
+    req = urllib.request.Request(
+        GROQ_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        },
+        method="POST"
+    )
+    try:
+        loop = asyncio.get_event_loop()
+        def do_request():
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read())
+        data = await loop.run_in_executor(None, do_request)
+        return data["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        return f"❌ خطای Groq {e.code}: {body[:300]}"
+    except Exception as e:
+        return f"❌ خطا: {type(e).__name__}: {e}"
 
 
 def register(app):
@@ -95,9 +118,16 @@ def register(app):
 
         await message.reply("⏳ در حال بررسی...")
 
+        pvs_text = ""
+        if "پیوی" in user_text and ("بخون" in user_text or "بخوان" in user_text or "نشون" in user_text):
+            accs = q("SELECT id,name FROM accounts WHERE admin_id=%s LIMIT 1", (ADMIN_ID,))
+            if accs:
+                pvs_text = await _read_pvs(accs[0][0])
+                pvs_text = f"\n\nآخرین پیوی‌ها:\n{pvs_text}"
+
         try:
             context = await _build_context()
-            answer = await _call_gemini(user_text, context)
+            answer = await _call_groq(user_text, context + pvs_text)
             await message.reply(f"🤖 {answer}")
         except Exception as e:
             await message.reply(f"❌ خطای کلی: {type(e).__name__}: {e}")
