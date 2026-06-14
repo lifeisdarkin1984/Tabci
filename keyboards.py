@@ -70,6 +70,7 @@ def global_kb():
          InlineKeyboardButton("📝 تغییر بیو",    callback_data="g_bio")],
         [InlineKeyboardButton("📊 آمار اکانت‌ها",   callback_data="g_stats"),
          InlineKeyboardButton("♻️ وضعیت اکانت‌ها", callback_data="g_status")],
+        [InlineKeyboardButton("🤖 دستیار هوشمند", callback_data="g_assistant")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ])
 

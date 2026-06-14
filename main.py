@@ -9,7 +9,7 @@ API_ID    = int(os.environ["API_ID"])
 API_HASH  = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
-from handlers import login, text_handler, callbacks
+from handlers import login, text_handler, callbacks, assistant
 from workers import secretary, scheduler, reply_worker, react_worker
 
 # توقف عملیات - global flag
@@ -28,6 +28,7 @@ async def main():
     login.register(app)
     text_handler.register(app)
     callbacks.register(app)
+    assistant.register(app)
 
     await app.start()
     print("✅ Tabchi Personal bot is running...")
