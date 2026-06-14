@@ -645,9 +645,103 @@ def register(app):
                       "VALUES(%s,%s,1) ON DUPLICATE KEY UPDATE force_join_active=1", (aid, ADMIN_ID))
                 await cb.answer("✅ عضویت اجبار برای همه فعال شد", show_alert=True)
 
-            elif d == "g_sch":
-                await cb.message.edit_text("⏰ از لیست تبچی اکانت مورد نظر را انتخاب کنید.",
-                                            reply_markup=back_kb("menu_global"))
+            elif d == "g_sch_menu":
+                await cb.message.edit_text(
+                    "⏰ **ارسال زمان‌دار همگانی**\n\nنوع ارسال را انتخاب کنید:",
+                    reply_markup=global_sch_menu_kb()
+                )
+
+            elif d.startswith("gsch_panel_"):
+                target = d[11:]  # groups یا pvs
+                row = q("SELECT is_active, interval_minutes FROM global_scheduler "
+                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                active = row[0][0] if row else 0
+                interval = row[0][1] if row else 60
+                title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
+                bnrs = q("SELECT slot, text, file_id FROM global_banners "
+                         "WHERE admin_id=%s AND target=%s ORDER BY slot", (ADMIN_ID, target))
+                txt = f"⏰ **ارسال زمان‌دار به {title}**\n\n"
+                txt += f"فاصله: هر {interval} دقیقه\nوضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n\n"
+                for slot in (1, 2, 3, 4):
+                    b = next((x for x in bnrs if x[0] == slot), None)
+                    if b:
+                        short = (b[1] or "")[:30]
+                        txt += f"💬 پیام {slot}: [{short}{'...' if b[1] and len(b[1])>30 else ''}] {'📁' if b[2] else ''}\n"
+                    else:
+                        txt += f"💬 پیام {slot}: تنظیم نشده\n"
+                txt += "\nهر دوره (هر X دقیقه) یکی از این پیام‌ها به‌ترتیب شماره ارسال می‌شود."
+                await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(target, active))
+
+            elif d.startswith("gsch_time_"):
+                target = d[10:]
+                set_step(ADMIN_ID, f"gsch_int_{target}")
+                await cb.message.edit_text(
+                    "⏱ فاصله ارسال (دقیقه) را وارد کنید:\nمثال: `60`",
+                    reply_markup=back_kb(f"gsch_panel_{target}")
+                )
+
+            elif d.startswith("gsch_tog_"):
+                target = d[9:]
+                row = q("SELECT is_active FROM global_scheduler WHERE admin_id=%s AND target=%s",
+                        (ADMIN_ID, target))
+                new = 0 if (row[0][0] if row else 0) else 1
+                u("INSERT INTO global_scheduler (admin_id,target,is_active) VALUES(%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, target, new, new))
+                if new:
+                    set_stop(False)
+                await cb.answer(f"ارسال زمان‌دار {'فعال' if new else 'غیرفعال'} شد")
+                row2 = q("SELECT is_active FROM global_scheduler WHERE admin_id=%s AND target=%s",
+                         (ADMIN_ID, target))
+                await cb.message.edit_reply_markup(global_sch_panel_kb(target, row2[0][0]))
+
+            elif d.startswith("gsch_b"):
+                # gsch_b1_groups / gsch_b2_pvs / ...
+                slot = int(d[6])
+                target = d[8:]
+                await cb.message.edit_text(
+                    f"✏️ مدیریت پیام {slot}",
+                    reply_markup=global_banner_slot_kb(target, slot)
+                )
+
+            elif d.startswith("gbn_add_"):
+                _, _, target, slot = d.split("_", 3)
+                slot = int(slot)
+                set_step(ADMIN_ID, f"gbn_text_{target}_{slot}")
+                await cb.message.edit_text("📝 متن پیام را وارد کنید:")
+
+            elif d.startswith("gbn_del_"):
+                _, _, target, slot = d.split("_", 3)
+                slot = int(slot)
+                u("DELETE FROM global_banners WHERE admin_id=%s AND target=%s AND slot=%s",
+                  (ADMIN_ID, target, slot))
+                await cb.answer(f"✅ پیام {slot} حذف شد")
+                await cb.message.edit_reply_markup(global_banner_slot_kb(target, slot))
+
+            elif d.startswith("gbn_delall_"):
+                target = d[11:]
+                u("DELETE FROM global_banners WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                await cb.answer("✅ همه پیام‌ها حذف شدند")
+
+            elif d.startswith("gbn_back_"):
+                target = d[9:]
+                row = q("SELECT is_active, interval_minutes FROM global_scheduler "
+                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                active = row[0][0] if row else 0
+                interval = row[0][1] if row else 60
+                title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
+                bnrs = q("SELECT slot, text, file_id FROM global_banners "
+                         "WHERE admin_id=%s AND target=%s ORDER BY slot", (ADMIN_ID, target))
+                txt = f"⏰ **ارسال زمان‌دار به {title}**\n\n"
+                txt += f"فاصله: هر {interval} دقیقه\nوضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n\n"
+                for slot in (1, 2, 3, 4):
+                    b = next((x for x in bnrs if x[0] == slot), None)
+                    if b:
+                        short = (b[1] or "")[:30]
+                        txt += f"💬 پیام {slot}: [{short}{'...' if b[1] and len(b[1])>30 else ''}] {'📁' if b[2] else ''}\n"
+                    else:
+                        txt += f"💬 پیام {slot}: تنظیم نشده\n"
+                txt += "\nهر دوره (هر X دقیقه) یکی از این پیام‌ها به‌ترتیب شماره ارسال می‌شود."
+                await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(target, active))
 
             elif d == "g_fwdgrp":
                 set_step(ADMIN_ID, "g_fwdgrp"); await cb.message.edit_text("📤 لینک پیام:", reply_markup=back_kb("menu_global"))

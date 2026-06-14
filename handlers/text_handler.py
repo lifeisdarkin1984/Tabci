@@ -3,7 +3,9 @@ from pyrogram import Client, filters
 from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
     InviteHashExpired, InviteHashInvalid, ChannelsTooMuch,
     UsernameOccupied, UsernameInvalid, ChatWriteForbidden,
-    UserBannedInChannel, ChatAdminRequired)
+    UserBannedInChannel, ChatAdminRequired, ChatRestricted,
+    SlowmodeWait, UserBlocked, ChatSendMediaForbidden,
+    ChatSendPlainForbidden, RPCError)
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
                    clear_step, get_user_client, save_account, is_stopped, set_stop)
@@ -88,6 +90,17 @@ def register(app):
             await message.reply(
                 "📎 فایل پیوست بفرستید یا بدون فایل ادامه دهید:",
                 reply_markup=back_kb(f"bn_back_{acc_id}_{ctx}")
+            )
+
+        elif step.startswith("gbn_text_"):
+            _, _, target, slot = step.split("_", 3)
+            slot = int(slot)
+            set_step(ADMIN_ID, f"gbn_file_{target}_{slot}", text)
+            u("INSERT INTO global_banners (admin_id,target,slot,text) VALUES(%s,%s,%s,%s) "
+              "ON DUPLICATE KEY UPDATE text=%s", (ADMIN_ID, target, slot, text, text))
+            await message.reply(
+                "📎 فایل پیوست بفرستید یا بدون فایل ادامه دهید:",
+                reply_markup=back_kb(f"gbn_back_{target}")
             )
 
         elif step.startswith("sgrp_"):
@@ -215,6 +228,21 @@ def register(app):
             await message.reply(f"✅ هر {text} دقیقه.", reply_markup=back_kb(f"m_sch_{acc_id}"))
             clear_step(ADMIN_ID)
 
+        elif step.startswith("gsch_int_"):
+            target = step[9:]
+            if not text.isdigit() or int(text) < 1:
+                await message.reply("❌ عدد دقیقه وارد کنید."); return
+            u("INSERT INTO global_scheduler (admin_id,target,interval_minutes) "
+              "VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE interval_minutes=%s",
+              (ADMIN_ID, target, int(text), int(text)))
+            from keyboards import global_sch_panel_kb
+            row = q("SELECT is_active FROM global_scheduler WHERE admin_id=%s AND target=%s",
+                    (ADMIN_ID, target))
+            active = row[0][0] if row else 0
+            await message.reply(f"✅ هر {text} دقیقه ارسال می‌شود.",
+                                 reply_markup=global_sch_panel_kb(target, active))
+            clear_step(ADMIN_ID)
+
         elif step == "g_bio":
             await _global_profile(message, "bio", text)
         elif step == "g_fname":
@@ -282,6 +310,25 @@ def register(app):
         if message.from_user.id != ADMIN_ID:
             return
         step = get_step(ADMIN_ID)
+
+        if step.startswith("gbn_file_"):
+            _, _, target, slot = step.split("_", 3)
+            slot = int(slot)
+            if message.photo:
+                fid, ftype = message.photo.file_id, "photo"
+            elif message.video:
+                fid, ftype = message.video.file_id, "video"
+            elif message.document:
+                fid, ftype = message.document.file_id, "document"
+            else:
+                return
+            u("UPDATE global_banners SET file_id=%s, file_type=%s "
+              "WHERE admin_id=%s AND target=%s AND slot=%s",
+              (fid, ftype, ADMIN_ID, target, slot))
+            await message.reply("✅ پیام با فایل ذخیره شد.", reply_markup=back_kb(f"gbn_back_{target}"))
+            clear_step(ADMIN_ID)
+            return
+
         if not step.startswith("bn_file_"):
             return
         _, _, acc_id, slot, ctx = step.split("_", 4)
@@ -462,7 +509,8 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
             ok += 1
             await asyncio.sleep(2)
 
-        except (ChatWriteForbidden, UserBannedInChannel) as e:
+        except (ChatWriteForbidden, UserBannedInChannel, ChatRestricted,
+                ChatSendMediaForbidden, ChatSendPlainForbidden) as e:
             err_str = str(e)
             # تشخیص عضویت اجبار
             fj_match = re.search(r'@([\w]+)|t\.me/([\w+]+)', err_str)
@@ -476,6 +524,13 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
                     ok += 1
                 except Exception:
                     fail += 1
+                    if auto_leave:
+                        try:
+                            await uc.leave_chat(dlg.chat.id)
+                            left += 1
+                        except Exception:
+                            pass
+                        limited += 1
             elif auto_leave:
                 try:
                     await uc.leave_chat(dlg.chat.id)
@@ -485,6 +540,10 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
                 limited += 1
             else:
                 limited += 1
+
+        except SlowmodeWait as e:
+            # محدودیت موقت - گروه را خارج نکن، فقط رد کن
+            limited += 1
 
         except FloodWait as e:
             await bot_client.send_message(
@@ -496,6 +555,21 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
                 await uc.send_message(dlg.chat.id, text)
                 ok += 1
             except Exception:
+                fail += 1
+
+        except RPCError as e:
+            # هر خطای دیگه‌ی تلگرام که نشون‌دهنده محدودیت ارسال است
+            err_str = str(e).lower()
+            restriction_keywords = ["forbidden", "banned", "restricted", "not_muted", "rights"]
+            if any(k in err_str for k in restriction_keywords):
+                if auto_leave:
+                    try:
+                        await uc.leave_chat(dlg.chat.id)
+                        left += 1
+                    except Exception:
+                        pass
+                limited += 1
+            else:
                 fail += 1
 
         except Exception:
