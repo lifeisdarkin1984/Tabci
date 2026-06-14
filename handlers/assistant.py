@@ -6,8 +6,7 @@ import urllib.error
 from database import q
 from utils import ADMIN_ID, get_user_client, get_step, set_step, clear_step
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 SYSTEM_PROMPT = """تو دستیار هوشمند مدیریت تبچی هستی.
 اطلاعات اکانت‌ها و وضعیت سرویس‌ها رو داری.
@@ -19,8 +18,7 @@ SYSTEM_PROMPT = """تو دستیار هوشمند مدیریت تبچی هستی
 - اگه اطلاعات کافی نداری صادقانه بگو"""
 
 
-async def _build_context(acc_id=None):
-    """ساخت context از دیتابیس برای ارسال به Gemini"""
+async def _build_context():
     accs = q("SELECT id,phone,name,status FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
     lines = [f"تعداد اکانت‌ها: {len(accs)}"]
     for a in accs:
@@ -30,7 +28,6 @@ async def _build_context(acc_id=None):
         sec_active = sec[0][0] if sec else 0
         sch_active = sch[0][0] if sch else 0
         sch_interval = sch[0][1] if sch else 0
-        replied = q("SELECT COUNT(*) FROM secretary WHERE account_id=%s", (aid,))
         lines.append(
             f"اکانت: {name} | {phone} | وضعیت: {status} | "
             f"منشی: {'فعال' if sec_active else 'غیرفعال'} | "
@@ -40,7 +37,6 @@ async def _build_context(acc_id=None):
 
 
 async def _read_pvs(acc_id, limit=10):
-    """خواندن آخرین پیوی‌ها"""
     from pyrogram import enums as en
     uc = await get_user_client(acc_id)
     if not uc:
@@ -62,12 +58,20 @@ async def _read_pvs(acc_id, limit=10):
 
 
 async def _call_gemini(user_msg: str, context: str) -> str:
-    """ارسال به Gemini و دریافت جواب"""
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        return "❌ GEMINI_API_KEY تنظیم نشده. آن را در Railway environment variables اضافه کنید."
+        return "❌ GEMINI_API_KEY تنظیم نشده در Railway."
 
-    url = f"{GEMINI_BASE_URL}?key={api_key}"
+    # کلید جدید AQ.Ab نیاز به header داره، کلید قدیمی AIza با query param کار می‌کنه
+    if api_key.startswith("AIza"):
+        url = f"{GEMINI_BASE_URL}?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+    else:
+        url = GEMINI_BASE_URL
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key
+        }
 
     payload = json.dumps({
         "contents": [
@@ -80,12 +84,7 @@ async def _call_gemini(user_msg: str, context: str) -> str:
         "generationConfig": {"maxOutputTokens": 500, "temperature": 0.3}
     }).encode()
 
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
         loop = asyncio.get_event_loop()
         def do_request():
@@ -95,9 +94,9 @@ async def _call_gemini(user_msg: str, context: str) -> str:
         return data["candidates"][0]["content"]["parts"][0]["text"]
     except urllib.error.HTTPError as e:
         body = e.read().decode()
-        return f"❌ خطای Gemini: {e.code}\n{body[:200]}"
+        return f"❌ خطای Gemini {e.code}: {body[:300]}"
     except Exception as e:
-        return f"❌ خطا: {e}"
+        return f"❌ خطا: {type(e).__name__}: {e}"
 
 
 def register(app):
@@ -115,7 +114,6 @@ def register(app):
 
         user_text = message.text.strip()
 
-        # خروج از حالت دستیار
         if user_text in ("/start", "خروج", "exit", "بازگشت"):
             clear_step(ADMIN_ID)
             from keyboards import main_menu_kb
@@ -124,7 +122,6 @@ def register(app):
 
         await message.reply("⏳ در حال بررسی...")
 
-        # بررسی درخواست خواندن پیوی
         pvs_text = ""
         if "پیوی" in user_text and ("بخون" in user_text or "بخوان" in user_text or "نشون" in user_text):
             accs = q("SELECT id,name FROM accounts WHERE admin_id=%s LIMIT 1", (ADMIN_ID,))
@@ -132,7 +129,9 @@ def register(app):
                 pvs_text = await _read_pvs(accs[0][0])
                 pvs_text = f"\n\nآخرین پیوی‌ها:\n{pvs_text}"
 
-        context = await _build_context()
-        answer = await _call_gemini(user_text, context + pvs_text)
-        await message.reply(f"🤖 {answer}")
-    
+        try:
+            context = await _build_context()
+            answer = await _call_gemini(user_text, context + pvs_text)
+            await message.reply(f"🤖 {answer}")
+        except Exception as e:
+            await message.reply(f"❌ خطای کلی: {type(e).__name__}: {e}")
