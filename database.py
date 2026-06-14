@@ -45,7 +45,8 @@ def init_db():
             session_string MEDIUMTEXT,
             admin_id BIGINT,
             status VARCHAR(20) DEFAULT 'active',
-            added_at BIGINT DEFAULT 0
+            added_at BIGINT DEFAULT 0,
+            auto_leave_limited TINYINT DEFAULT 0
         )""",
         """CREATE TABLE IF NOT EXISTS pending_logins (
             phone VARCHAR(30) PRIMARY KEY,
@@ -91,9 +92,36 @@ def init_db():
             max_delay INT DEFAULT 420,
             force_join_active TINYINT DEFAULT 0
         )""",
+        """CREATE TABLE IF NOT EXISTS reply_rand (
+            account_id VARCHAR(50) PRIMARY KEY,
+            admin_id BIGINT,
+            message_text VARCHAR(2000) DEFAULT '',
+            interval_minutes INT DEFAULT 30,
+            is_active TINYINT DEFAULT 0,
+            last_run BIGINT DEFAULT 0
+        )""",
+        """CREATE TABLE IF NOT EXISTS react_rand (
+            account_id VARCHAR(50) PRIMARY KEY,
+            admin_id BIGINT,
+            interval_minutes INT DEFAULT 30,
+            is_active TINYINT DEFAULT 0,
+            last_run BIGINT DEFAULT 0
+        )""",
     ]
     for s in stmts:
-        cur.execute(s)
+        try:
+            cur.execute(s)
+        except Exception as e:
+            print(f"[DB init] {e}")
+    # اضافه کردن ستون‌های جدید اگه وجود ندارن
+    alters = [
+        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS auto_leave_limited TINYINT DEFAULT 0",
+    ]
+    for a in alters:
+        try:
+            cur.execute(a)
+        except Exception:
+            pass
     db.commit()
     db.close()
     print("✅ DB ready")

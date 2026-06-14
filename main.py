@@ -1,7 +1,7 @@
 import asyncio, os
 from pyrogram import Client, idle
 from dotenv import load_dotenv
-from database import init_db
+from database import init_db, update_db
 
 load_dotenv()
 
@@ -10,10 +10,15 @@ API_HASH  = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 from handlers import login, text_handler, callbacks
-from workers import secretary, scheduler
+from workers import secretary, scheduler, reply_worker, react_worker
+
+# توقف عملیات - global flag
+stop_flags = {}
 
 async def main():
     init_db()
+    update_db()
+
     app = Client(
         "tabchi_bot",
         api_id=API_ID,
@@ -31,6 +36,8 @@ async def main():
     await asyncio.gather(
         secretary.run(),
         scheduler.run(),
+        reply_worker.run(),
+        react_worker.run(),
         idle(),
     )
 
