@@ -101,11 +101,12 @@ async def _call_gemini(user_msg: str, context: str) -> str:
 
 
 def register(app):
+    from pyrogram import filters
 
     @app.on_message(
-        __import__("pyrogram.filters", fromlist=["filters"]).filters.text
-        & __import__("pyrogram.filters", fromlist=["filters"]).filters.private
-        & __import__("pyrogram.filters", fromlist=["filters"]).filters.user(ADMIN_ID)
+        filters.text
+        & filters.private
+        & filters.user(ADMIN_ID)
     )
     async def on_assistant_msg(client, message):
         step = get_step(ADMIN_ID)
