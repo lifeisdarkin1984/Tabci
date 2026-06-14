@@ -6,14 +6,12 @@ import urllib.error
 from database import q
 from utils import ADMIN_ID, get_user_client, get_step, set_step, clear_step
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 SYSTEM_PROMPT = """تو دستیار هوشمند مدیریت تبچی هستی.
 اطلاعات اکانت‌ها و وضعیت سرویس‌ها رو داری.
 قوانین:
 - سوال‌های آماری رو مستقیم و کوتاه جواب بده
-- برای عملیات مهم (ارسال پیام، خاموش کردن سرویس) بگو "تایید کنید: [عملیات]"
-- پیام‌های پیوی رو فقط خلاصه کن، عین متن رو نقل نکن
 - جواب‌ها کوتاه، مفید و به فارسی باشن
 - اگه اطلاعات کافی نداری صادقانه بگو"""
 
@@ -57,13 +55,13 @@ async def _read_pvs(acc_id, limit=10):
     return "\n".join(results) if results else "پیوی‌ای یافت نشد"
 
 
-async def _call_groq(user_msg: str, context: str) -> str:
-    api_key = os.environ.get("GROQ_API_KEY", "")
+async def _call_ai(user_msg: str, context: str) -> str:
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
-        return "❌ GROQ_API_KEY تنظیم نشده در Railway."
+        return "❌ OPENROUTER_API_KEY تنظیم نشده در Railway."
 
     payload = json.dumps({
-        "model": "llama-3.1-8b-instant",
+        "model": "meta-llama/llama-3.1-8b-instruct:free",
         "messages": [
             {"role": "system", "content": f"{SYSTEM_PROMPT}\n\nاطلاعات فعلی:\n{context}"},
             {"role": "user", "content": user_msg}
@@ -73,24 +71,26 @@ async def _call_groq(user_msg: str, context: str) -> str:
     }).encode()
 
     req = urllib.request.Request(
-        GROQ_URL,
+        OPENROUTER_URL,
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://tabchi.app",
+            "X-Title": "Tabchi Assistant"
         },
         method="POST"
     )
     try:
         loop = asyncio.get_event_loop()
         def do_request():
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=20) as resp:
                 return json.loads(resp.read())
         data = await loop.run_in_executor(None, do_request)
         return data["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as e:
         body = e.read().decode()
-        return f"❌ خطای Groq {e.code}: {body[:300]}"
+        return f"❌ خطا {e.code}: {body[:300]}"
     except Exception as e:
         return f"❌ خطا: {type(e).__name__}: {e}"
 
@@ -127,7 +127,7 @@ def register(app):
 
         try:
             context = await _build_context()
-            answer = await _call_groq(user_text, context + pvs_text)
+            answer = await _call_ai(user_text, context + pvs_text)
             await message.reply(f"🤖 {answer}")
         except Exception as e:
             await message.reply(f"❌ خطای کلی: {type(e).__name__}: {e}")
