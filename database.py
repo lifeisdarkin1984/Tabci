@@ -113,15 +113,28 @@ def init_db():
             cur.execute(s)
         except Exception as e:
             print(f"[DB init] {e}")
-    # اضافه کردن ستون‌های جدید اگه وجود ندارن
-    alters = [
-        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS auto_leave_limited TINYINT DEFAULT 0",
-    ]
-    for a in alters:
+    # اضافه کردن ستون‌های جدید اگه وجود ندارن (سازگار با همه نسخه‌های MySQL)
+    def column_exists(table, column):
         try:
-            cur.execute(a)
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s",
+                (os.environ["MYSQLDATABASE"], table, column)
+            )
+            return cur.fetchone()[0] > 0
         except Exception:
-            pass
+            return True  # در صورت خطا فرض کن وجود دارد تا ALTER اجرا نشود
+
+    new_columns = [
+        ("accounts", "auto_leave_limited", "TINYINT DEFAULT 0"),
+    ]
+    for table, col, definition in new_columns:
+        if not column_exists(table, col):
+            try:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
+                print(f"[DB init] added column {col} to {table}")
+            except Exception as e:
+                print(f"[DB init] {e}")
     db.commit()
     db.close()
     print("✅ DB ready")
