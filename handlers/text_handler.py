@@ -4,8 +4,7 @@ from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
     InviteHashExpired, InviteHashInvalid, ChannelsTooMuch,
     UsernameOccupied, UsernameInvalid, ChatWriteForbidden,
     UserBannedInChannel, ChatAdminRequired, ChatRestricted,
-    SlowmodeWait, UserBlocked, ChatSendMediaForbidden,
-    ChatSendPlainForbidden, RPCError)
+    SlowmodeWait, UserBlocked, ChatSendMediaForbidden, RPCError)
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
                    clear_step, get_user_client, save_account, is_stopped, set_stop)
@@ -510,7 +509,7 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
             await asyncio.sleep(2)
 
         except (ChatWriteForbidden, UserBannedInChannel, ChatRestricted,
-                ChatSendMediaForbidden, ChatSendPlainForbidden) as e:
+                ChatSendMediaForbidden) as e:
             err_str = str(e)
             # تشخیص عضویت اجبار
             fj_match = re.search(r'@([\w]+)|t\.me/([\w+]+)', err_str)
