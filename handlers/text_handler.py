@@ -1,10 +1,13 @@
 import asyncio, random, re, time
 from pyrogram import Client, filters
 from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
-    InviteHashExpired, InviteHashInvalid, ChannelsTooMuch, UsernameOccupied, UsernameInvalid)
+    InviteHashExpired, InviteHashInvalid, ChannelsTooMuch,
+    UsernameOccupied, UsernameInvalid, ChatWriteForbidden,
+    UserBannedInChannel, ChatAdminRequired)
 from database import q, u
-from utils import ADMIN_ID, get_step, get_step_data, set_step, clear_step, get_user_client, save_account
-from keyboards import (main_menu_kb, manage_kb, back_kb, confirm_kb, global_kb)
+from utils import (ADMIN_ID, get_step, get_step_data, set_step,
+                   clear_step, get_user_client, save_account, is_stopped, set_stop)
+from keyboards import manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb, react_rand_kb
 from handlers.login import send_code, sign_in
 
 def register(app):
@@ -17,7 +20,6 @@ def register(app):
         step = get_step(ADMIN_ID)
         text = message.text.strip()
 
-        # ══ لاگین: شماره ══
         if step == "login_phone":
             if not text.startswith("+"):
                 await message.reply("❌ شماره باید با + شروع شود.\nمثال: `+989123456789`")
@@ -28,13 +30,12 @@ def register(app):
                 set_step(ADMIN_ID, "login_code", text)
                 await msg.edit_text(f"✅ کد به `{text}` ارسال شد.\n\nکد دریافتی را وارد کنید:")
             except FloodWait as e:
-                await msg.edit_text(f"❌ محدودیت تلگرام. {e.value} ثانیه صبر کنید.")
+                await msg.edit_text(f"❌ محدودیت. {e.value} ثانیه صبر کنید.")
                 clear_step(ADMIN_ID)
             except Exception as e:
                 await msg.edit_text(f"❌ خطا: `{e}`")
                 clear_step(ADMIN_ID)
 
-        # ══ لاگین: کد ══
         elif step == "login_code":
             phone = get_step_data(ADMIN_ID)
             result, err = await sign_in(phone, code=text)
@@ -44,28 +45,20 @@ def register(app):
                 return
             await _handle_login_result(message, result, err, phone)
 
-        # ══ لاگین: رمز ۲FA ══
         elif step == "login_2fa":
             phone = get_step_data(ADMIN_ID)
             result, err = await sign_in(phone, password=text)
             await _handle_login_result(message, result, err, phone)
 
-        # ══ بیو ══
         elif step.startswith("set_bio_"):
-            acc_id = step[8:]
-            await _profile_action(message, acc_id, "bio", text)
+            await _profile_action(message, step[8:], "bio", text)
 
-        # ══ نام ══
         elif step.startswith("set_fname_"):
-            acc_id = step[10:]
-            await _profile_action(message, acc_id, "fname", text)
+            await _profile_action(message, step[10:], "fname", text)
 
-        # ══ فامیلی ══
         elif step.startswith("set_lname_"):
-            acc_id = step[10:]
-            await _profile_action(message, acc_id, "lname", text)
+            await _profile_action(message, step[10:], "lname", text)
 
-        # ══ آیدی ══
         elif step.startswith("set_uname_"):
             acc_id = step[10:]
             uname = text.lstrip("@")
@@ -85,98 +78,120 @@ def register(app):
                 await message.reply(f"❌ خطا: {e}", reply_markup=manage_kb(acc_id))
             clear_step(ADMIN_ID)
 
-        # ══ متن بنر ══
         elif step.startswith("bn_text_"):
             parts = step.split("_")
-            # bn_text_{acc_id}_{slot}_{ctx}
             acc_id, slot, ctx = parts[2], int(parts[3]), parts[4]
             set_step(ADMIN_ID, f"bn_file_{acc_id}_{slot}_{ctx}", text)
-            # ذخیره موقت
             u("INSERT INTO banners (account_id,admin_id,slot,text,context) "
               "VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE text=%s",
               (acc_id, ADMIN_ID, slot, text, ctx, text))
             await message.reply(
-                "📎 حالا فایل پیوست (عکس/ویدیو) را بفرستید یا بدون فایل ادامه دهید:",
+                "📎 فایل پیوست بفرستید یا بدون فایل ادامه دهید:",
                 reply_markup=back_kb(f"bn_back_{acc_id}_{ctx}")
             )
 
-        # ══ ارسال پیام به گروه‌ها ══
         elif step.startswith("sgrp_"):
             acc_id = step[5:]
-            await message.reply(
-                f"📢 متن پیام:\n\n{text}\n\nارسال به همه گروه‌ها؟",
-                reply_markup=confirm_kb(f"sgrp_go_{acc_id}_{_enc(text)}", f"acc_manage_{acc_id}")
-            )
             set_step(ADMIN_ID, f"sgrp_confirm_{acc_id}", text)
+            await message.reply(
+                f"📢 متن:\n\n{text}\n\nارسال به همه گروه‌ها؟",
+                reply_markup=confirm_kb(f"sgrp_go_{acc_id}", f"acc_manage_{acc_id}")
+            )
 
-        # ══ ارسال پیام به پیوی‌ها ══
         elif step.startswith("spv_"):
             acc_id = step[4:]
+            set_step(ADMIN_ID, f"spv_confirm_{acc_id}", text)
             await message.reply(
-                f"💬 متن پیام:\n\n{text}\n\nارسال به همه پیوی‌ها؟",
+                f"💬 متن:\n\n{text}\n\nارسال به همه پیوی‌ها؟",
                 reply_markup=confirm_kb(f"spv_go_{acc_id}", f"acc_manage_{acc_id}")
             )
-            set_step(ADMIN_ID, f"spv_confirm_{acc_id}", text)
 
-        # ══ استخراج لینک - کانال ══
         elif step.startswith("ext_ch_"):
+            # استخراج از یک لینکدونی
             acc_id = step[7:]
             ch = text.lstrip("@")
             set_step(ADMIN_ID, f"ext_cnt_{acc_id}", ch)
             await message.reply(
-                "لطفاً انتخاب کنید در چند پیام اخیر دنبال لینک بگردم:\n\n"
-                "📩 حداقل ۱ و حداکثر ۱۰۰۰ پیام\n\nعدد مورد نظر را ارسال کنید:",
+                "📩 چند پیام آخر بررسی شود؟ (۱ تا ۱۰۰۰):",
                 reply_markup=back_kb(f"m_ext_{acc_id}")
             )
 
-        # ══ استخراج لینک - تعداد ══
         elif step.startswith("ext_cnt_"):
             acc_id = step[8:]
             ch = get_step_data(ADMIN_ID)
             if not text.isdigit() or not (1 <= int(text) <= 1000):
-                await message.reply("❌ عدد باید بین ۱ تا ۱۰۰۰ باشد.")
+                await message.reply("❌ عدد بین ۱ تا ۱۰۰۰ وارد کنید.")
                 return
-            msg = await message.reply("⏳ در حال استخراج لینک‌ها...")
+            msg = await message.reply("⏳ در حال استخراج...")
             links = await _extract_links(acc_id, ch, int(text))
             if not links:
                 await msg.edit_text("🔍 لینکی یافت نشد.")
             else:
                 out = "\n".join(links)
-                # اگه طولانی بود تقسیم کن
                 if len(out) > 4000:
                     chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
-                    for ch_txt in chunks:
-                        await message.reply(ch_txt)
                     await msg.delete()
+                    for chunk in chunks:
+                        await message.reply(chunk)
                 else:
                     await msg.edit_text(out)
             clear_step(ADMIN_ID)
 
-        # ══ عضویت در لینک‌ها ══
+        elif step.startswith("ext_multi_ch_"):
+            # استخراج از چند لینکدونی - دریافت آیدی‌ها
+            acc_id = step[13:]
+            channels = [c.strip().lstrip("@") for c in text.splitlines() if c.strip()]
+            if not channels:
+                await message.reply("❌ هیچ کانالی وارد نشد.")
+                return
+            set_step(ADMIN_ID, f"ext_multi_cnt_{acc_id}", "\n".join(channels))
+            await message.reply(
+                f"✅ {len(channels)} لینکدونی دریافت شد.\n\nچند لینک آخر از هر لینکدونی استخراج شود؟",
+                reply_markup=back_kb(f"m_ext_{acc_id}")
+            )
+
+        elif step.startswith("ext_multi_cnt_"):
+            acc_id = step[14:]
+            channels = get_step_data(ADMIN_ID).splitlines()
+            if not text.isdigit() or int(text) < 1:
+                await message.reply("❌ عدد معتبر وارد کنید.")
+                return
+            limit = int(text)
+            msg = await message.reply(f"⏳ استخراج {limit} لینک از {len(channels)} لینکدونی...")
+            all_links = []
+            for ch in channels:
+                links = await _extract_links(acc_id, ch, limit)
+                all_links.extend(links)
+            # حذف تکراری
+            all_links = list(dict.fromkeys(all_links))
+            if not all_links:
+                await msg.edit_text("🔍 لینکی یافت نشد.")
+            else:
+                out = "\n".join(all_links)
+                if len(out) > 4000:
+                    chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
+                    await msg.delete()
+                    for chunk in chunks:
+                        await message.reply(chunk)
+                else:
+                    await msg.edit_text(out)
+            clear_step(ADMIN_ID)
+
         elif step.startswith("join_"):
             acc_id = step[5:]
             links = [l.strip() for l in text.splitlines() if l.strip()]
             if not links:
                 await message.reply("❌ لینکی وارد نشد.")
                 return
-            if len(links) > 10:
-                await message.reply(
-                    "⚠️ برای جلوگیری از محدودیت، پیشنهاد می‌شود کمتر از ۱۰ لینک وارد کنید.\n"
-                    f"شما {len(links)} لینک وارد کردید. ادامه می‌دهید؟",
-                    reply_markup=confirm_kb(f"join_go_{acc_id}", f"acc_manage_{acc_id}")
-                )
-                set_step(ADMIN_ID, f"join_confirm_{acc_id}", "\n".join(links))
-                return
             row = q("SELECT min_delay,max_delay FROM join_settings WHERE account_id=%s", (acc_id,))
             mn, mx = (row[0][0], row[0][1]) if row else (180, 420)
             await message.reply(
-                f"✅ **{len(links)} لینک دریافت شد**\n\n"
-                f"⏱ فاصله بین هر عضویت: {mn//60}–{mx//60} دقیقه\n\n🚀 عملیات شروع شد..."
+                f"✅ **{len(links)} لینک دریافت شد**\n"
+                f"⏱ فاصله: {mn//60}–{mx//60} دقیقه\n🚀 شروع شد..."
             )
             asyncio.create_task(_join_links(client, acc_id, links, mn, mx))
             clear_step(ADMIN_ID)
 
-        # ══ تنظیم تاخیر عضویت ══
         elif step.startswith("joindelay_"):
             acc_id = step[10:]
             parts = text.split()
@@ -187,24 +202,19 @@ def register(app):
             u("INSERT INTO join_settings (account_id,admin_id,min_delay,max_delay) "
               "VALUES(%s,%s,%s,%s) ON DUPLICATE KEY UPDATE min_delay=%s,max_delay=%s",
               (acc_id, ADMIN_ID, mn, mx, mn, mx))
-            await message.reply(f"✅ فاصله: {parts[0]}–{parts[1]} دقیقه تنظیم شد.",
-                                 reply_markup=manage_kb(acc_id))
+            await message.reply(f"✅ فاصله: {parts[0]}–{parts[1]} دقیقه", reply_markup=manage_kb(acc_id))
             clear_step(ADMIN_ID)
 
-        # ══ زمان‌بند: interval ══
         elif step.startswith("sch_int_"):
             acc_id = step[8:]
             if not text.isdigit() or int(text) < 1:
-                await message.reply("❌ عدد دقیقه وارد کنید. مثال: `10`")
-                return
+                await message.reply("❌ عدد دقیقه وارد کنید."); return
             u("INSERT INTO scheduler (account_id,admin_id,interval_minutes) "
               "VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE interval_minutes=%s",
               (acc_id, ADMIN_ID, int(text), int(text)))
-            await message.reply(f"✅ هر {text} دقیقه ارسال می‌شود.",
-                                 reply_markup=back_kb(f"m_sch_{acc_id}"))
+            await message.reply(f"✅ هر {text} دقیقه.", reply_markup=back_kb(f"m_sch_{acc_id}"))
             clear_step(ADMIN_ID)
 
-        # ══ global: بیو ══
         elif step == "g_bio":
             await _global_profile(message, "bio", text)
         elif step == "g_fname":
@@ -212,7 +222,6 @@ def register(app):
         elif step == "g_lname":
             await _global_profile(message, "lname", text)
 
-        # ══ global: پیام به گروه‌ها ══
         elif step == "g_sgrp":
             set_step(ADMIN_ID, "g_sgrp_confirm", text)
             await message.reply(
@@ -220,7 +229,6 @@ def register(app):
                 reply_markup=confirm_kb("g_sgrp_go", "menu_global")
             )
 
-        # ══ global: پیام به پیوی‌ها ══
         elif step == "g_spv":
             set_step(ADMIN_ID, "g_spv_confirm", text)
             await message.reply(
@@ -228,7 +236,6 @@ def register(app):
                 reply_markup=confirm_kb("g_spv_go", "menu_global")
             )
 
-        # ══ global: لینک عضویت ══
         elif step == "g_join":
             links = [l.strip() for l in text.splitlines() if l.strip()]
             set_step(ADMIN_ID, "g_join_links", "\n".join(links))
@@ -237,6 +244,37 @@ def register(app):
                 f"✅ {len(links)} لینک دریافت شد.\nنوع عضویت را انتخاب کنید:",
                 reply_markup=global_join_kb()
             )
+
+        elif step.startswith("rr_msg_"):
+            acc_id = step[7:]
+            u("INSERT INTO reply_rand (account_id,admin_id,message_text) VALUES(%s,%s,%s) "
+              "ON DUPLICATE KEY UPDATE message_text=%s", (acc_id, ADMIN_ID, text, text))
+            row = q("SELECT is_active FROM reply_rand WHERE account_id=%s", (acc_id,))
+            active = row[0][0] if row else 0
+            await message.reply("✅ متن ریپلای تنظیم شد.", reply_markup=reply_rand_kb(acc_id, active))
+            clear_step(ADMIN_ID)
+
+        elif step.startswith("rr_int_"):
+            acc_id = step[7:]
+            if not text.isdigit() or int(text) < 1:
+                await message.reply("❌ عدد دقیقه وارد کنید."); return
+            u("INSERT INTO reply_rand (account_id,admin_id,interval_minutes) VALUES(%s,%s,%s) "
+              "ON DUPLICATE KEY UPDATE interval_minutes=%s", (acc_id, ADMIN_ID, int(text), int(text)))
+            row = q("SELECT is_active FROM reply_rand WHERE account_id=%s", (acc_id,))
+            active = row[0][0] if row else 0
+            await message.reply(f"✅ هر {text} دقیقه ریپلای.", reply_markup=reply_rand_kb(acc_id, active))
+            clear_step(ADMIN_ID)
+
+        elif step.startswith("rc_int_"):
+            acc_id = step[7:]
+            if not text.isdigit() or int(text) < 1:
+                await message.reply("❌ عدد دقیقه وارد کنید."); return
+            u("INSERT INTO react_rand (account_id,admin_id,interval_minutes) VALUES(%s,%s,%s) "
+              "ON DUPLICATE KEY UPDATE interval_minutes=%s", (acc_id, ADMIN_ID, int(text), int(text)))
+            row = q("SELECT is_active FROM react_rand WHERE account_id=%s", (acc_id,))
+            active = row[0][0] if row else 0
+            await message.reply(f"✅ هر {text} دقیقه ری‌اکت.", reply_markup=react_rand_kb(acc_id, active))
+            clear_step(ADMIN_ID)
 
 
     @app.on_message(filters.private & (filters.photo | filters.video | filters.document))
@@ -259,8 +297,7 @@ def register(app):
         u("UPDATE banners SET file_id=%s, file_type=%s "
           "WHERE account_id=%s AND slot=%s AND context=%s",
           (fid, ftype, acc_id, slot, ctx))
-        await message.reply("✅ بنر با فایل پیوست ذخیره شد.",
-                             reply_markup=back_kb(f"bn_back_{acc_id}_{ctx}"))
+        await message.reply("✅ بنر با فایل ذخیره شد.", reply_markup=back_kb(f"bn_back_{acc_id}_{ctx}"))
         clear_step(ADMIN_ID)
 
 
@@ -270,13 +307,12 @@ async def _handle_login_result(message, result, err, phone):
     if err:
         errs = {
             "bad_code": "❌ کد اشتباه است.",
-            "expired_code": "❌ کد منقضی شده. دوباره /add_account بزنید.",
+            "expired_code": "❌ کد منقضی شد. دوباره /add_account بزنید.",
             "expired": "❌ جلسه منقضی شد. دوباره /add_account بزنید.",
             "bad_pass": "❌ پسورد اشتباه است.",
         }
         if err.startswith("flood:"):
-            secs = err.split(":")[1]
-            await message.reply(f"❌ محدودیت تلگرام. {secs} ثانیه صبر کنید.")
+            await message.reply(f"❌ محدودیت. {err.split(':')[1]} ثانیه صبر کنید.")
         else:
             await message.reply(errs.get(err, f"❌ خطا: {err}"))
         if err in ("expired_code", "expired"):
@@ -285,11 +321,11 @@ async def _handle_login_result(message, result, err, phone):
     me, ss = result
     save_account(me, ss, phone)
     cnt = q("SELECT COUNT(*) FROM accounts WHERE admin_id=%s", (ADMIN_ID,))[0][0]
+    from keyboards import main_menu_kb
     await message.reply(
-        f"✅ **اکانت با موفقیت اضافه شد!**\n\n"
-        f"👤 نام: {me.first_name or ''} {me.last_name or ''}\n"
-        f"📱 شماره: `{phone}`\n"
-        f"🤖 تعداد تبچی‌های فعال: `{cnt}`",
+        f"✅ **اکانت اضافه شد!**\n\n"
+        f"👤 {me.first_name or ''} {me.last_name or ''}\n"
+        f"📱 `{phone}`\n🤖 تعداد تبچی‌ها: `{cnt}`",
         reply_markup=main_menu_kb()
     )
     clear_step(ADMIN_ID)
@@ -310,7 +346,7 @@ async def _profile_action(message, acc_id, action, value):
         elif action == "lname":
             await uc.update_profile(first_name=me.first_name or "", last_name=value)
         await uc.stop()
-        await message.reply("✅ با موفقیت تنظیم شد.", reply_markup=manage_kb(acc_id))
+        await message.reply("✅ تنظیم شد.", reply_markup=manage_kb(acc_id))
     except Exception as e:
         await message.reply(f"❌ خطا: {e}", reply_markup=manage_kb(acc_id))
     clear_step(ADMIN_ID)
@@ -331,7 +367,9 @@ async def _extract_links(acc_id, channel, limit):
         pass
     return list(dict.fromkeys(links))
 
+
 async def _join_links(bot_client, acc_id, links, min_d, max_d):
+    """عضویت در لینک‌ها با هندل کامل خطاها"""
     uc = await get_user_client(acc_id)
     if not uc:
         return
@@ -339,8 +377,14 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d):
     me = await uc.get_me()
     acc_display = me.phone_number or str(me.id)
     ok_links, fail_links = [], []
+    # چک auto_leave
+    row = q("SELECT auto_leave_limited FROM accounts WHERE id=%s", (acc_id,))
+    auto_leave = row[0][0] if row else 0
 
     for i, link in enumerate(links, 1):
+        if is_stopped():
+            await bot_client.send_message(ADMIN_ID, "🛑 عملیات توسط کاربر متوقف شد.")
+            break
         target = link.lstrip("@") if link.startswith("@") else link
         try:
             await uc.join_chat(target)
@@ -348,28 +392,22 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d):
             await bot_client.send_message(ADMIN_ID, f"✅ [{i}/{len(links)}] عضو شد: `{link}`")
 
         except FloodWait as e:
-            wait_s  = e.value
-            safe_s  = int(wait_s * 3.5)
+            wait_s = e.value
+            safe_s = int(wait_s * 3.5)
             await bot_client.send_message(
                 ADMIN_ID,
-                f"❗️ عملیات عضو شدن در کانال یا گروه متوقف شد "
-                f"شما به محدودیت تلگرام خورده اید به مدت {wait_s} ثانیه\n\n"
-                f"جهت جلوگیری از مسدود شدن اکانت ربات پس از {safe_s} ثانیه "
-                f"دیگر به عملیات خود ادامه می دهد\n"
-                f"👤 اکانت : {acc_display}"
+                f"❗️ محدودیت تلگرام {wait_s} ثانیه\n"
+                f"پس از {safe_s} ثانیه ادامه می‌دهد\n👤 {acc_display}"
             )
             await asyncio.sleep(safe_s)
             try:
                 await uc.join_chat(target)
                 ok_links.append(link)
-                await bot_client.send_message(ADMIN_ID, f"✅ [{i}/{len(links)}] بعد از محدودیت عضو شد: `{link}`")
             except Exception as e2:
                 fail_links.append(link)
-                await bot_client.send_message(ADMIN_ID, f"❌ [{i}/{len(links)}] ناموفق بعد از محدودیت: `{link}`\n{e2}")
 
         except UserAlreadyParticipant:
             ok_links.append(link)
-            await bot_client.send_message(ADMIN_ID, f"ℹ️ [{i}/{len(links)}] قبلاً عضو بود: `{link}`")
 
         except (InviteHashExpired, InviteHashInvalid):
             fail_links.append(link)
@@ -377,30 +415,96 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d):
 
         except ChannelsTooMuch:
             fail_links.append(link)
-            await bot_client.send_message(
-                ADMIN_ID,
-                f"⛔️ اکانت به حداکثر تعداد کانال رسیده. عملیات متوقف شد.\n👤 اکانت: {acc_display}"
-            )
+            await bot_client.send_message(ADMIN_ID, f"⛔️ اکانت پر شده. متوقف شد.")
             break
 
         except Exception as e:
             fail_links.append(link)
             await bot_client.send_message(ADMIN_ID, f"❌ [{i}/{len(links)}] خطا: `{link}`\n{e}")
 
-        if i < len(links):
+        if i < len(links) and not is_stopped():
             delay = random.randint(min_d, max_d)
             await bot_client.send_message(
-                ADMIN_ID, f"⏳ صبر {delay//60} دقیقه و {delay%60} ثانیه تا عضویت بعدی...")
+                ADMIN_ID, f"⏳ صبر {delay//60}دقیقه {delay%60}ثانیه...")
             await asyncio.sleep(delay)
 
     await uc.stop()
     total = len(ok_links) + len(fail_links)
-    report = (f"✅ عملیات عضو شدن در {total} گروه یا کانال با موفقیت انجام شد\n"
-              f"👤 اکانت {acc_display}\n"
-              f"موفق ها : {len(ok_links)}\nناموفق ها : {len(fail_links)}")
+    report = (f"✅ عملیات عضویت تمام شد\n👤 {acc_display}\n"
+              f"موفق: {len(ok_links)}\nناموفق: {len(fail_links)}")
     if fail_links:
-        report += "\n\n❗️ لیست ناموفق ها :\n" + "\n".join(fail_links)
+        report += "\n\n❗️ ناموفق‌ها:\n" + "\n".join(fail_links)
     await bot_client.send_message(ADMIN_ID, report)
+
+
+async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
+    """ارسال پیام هوشمند با تشخیص محدودیت و عضویت اجبار"""
+    from pyrogram import enums as en
+    uc = await get_user_client(acc_id)
+    if not uc:
+        return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0}
+    me_info = q("SELECT phone, auto_leave_limited FROM accounts WHERE id=%s", (acc_id,))
+    display = me_info[0][0] if me_info else acc_id
+    auto_leave = me_info[0][1] if me_info else 0
+    row_fj = q("SELECT force_join_active FROM join_settings WHERE account_id=%s", (acc_id,))
+    do_force_join = row_fj[0][0] if row_fj else 0
+
+    ok = fail = limited = force_joined = left = 0
+    await uc.start()
+
+    async for dlg in uc.get_dialogs():
+        if is_stopped():
+            break
+        if dlg.chat.type not in (en.ChatType.GROUP, en.ChatType.SUPERGROUP):
+            continue
+        try:
+            await uc.send_message(dlg.chat.id, text)
+            ok += 1
+            await asyncio.sleep(2)
+
+        except (ChatWriteForbidden, UserBannedInChannel) as e:
+            err_str = str(e)
+            # تشخیص عضویت اجبار
+            fj_match = re.search(r'@([\w]+)|t\.me/([\w+]+)', err_str)
+            if do_force_join and fj_match:
+                ch = fj_match.group(1) or fj_match.group(2)
+                try:
+                    await uc.join_chat(ch)
+                    force_joined += 1
+                    await asyncio.sleep(2)
+                    await uc.send_message(dlg.chat.id, text)
+                    ok += 1
+                except Exception:
+                    fail += 1
+            elif auto_leave:
+                try:
+                    await uc.leave_chat(dlg.chat.id)
+                    left += 1
+                except Exception:
+                    pass
+                limited += 1
+            else:
+                limited += 1
+
+        except FloodWait as e:
+            await bot_client.send_message(
+                ADMIN_ID,
+                f"❗️ محدودیت {e.value} ثانیه\n👤 {display}"
+            )
+            await asyncio.sleep(e.value * 2)
+            try:
+                await uc.send_message(dlg.chat.id, text)
+                ok += 1
+            except Exception:
+                fail += 1
+
+        except Exception:
+            fail += 1
+
+    await uc.stop()
+    return {"ok": ok, "fail": fail, "limited": limited,
+            "force_joined": force_joined, "left": left, "display": display}
+
 
 async def _global_profile(message, action, value):
     accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
@@ -423,11 +527,7 @@ async def _global_profile(message, action, value):
         except Exception:
             fail += 1
     await message.reply(
-        f"✅ عملیات کامل شد:\n✔️ موفق: {ok}\n❌ ناموفق: {fail}",
+        f"✅ کامل شد:\n✔️ موفق: {ok}\n❌ ناموفق: {fail}",
         reply_markup=global_kb()
     )
     clear_step(ADMIN_ID)
-
-def _enc(text):
-    """کوتاه‌سازی متن برای callback_data"""
-    return text[:20].replace(" ", "_")
