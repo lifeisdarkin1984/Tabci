@@ -55,7 +55,7 @@ def manage_kb(acc_id):
 def global_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🛑 توقف تمام عملیات", callback_data="g_stopall")],
-        [InlineKeyboardButton("⏰ ارسال زمان‌دار",          callback_data="g_sch"),
+        [InlineKeyboardButton("⏰ ارسال زمان‌دار",          callback_data="g_sch_menu"),
          InlineKeyboardButton("➕ عضو شدن گروه‌ها",        callback_data="g_join")],
         [InlineKeyboardButton("🕵️ عضویت اجبار",            callback_data="g_fj"),
          InlineKeyboardButton("🚫 خروج خودکار محدود",      callback_data="g_autoleave")],
@@ -170,6 +170,36 @@ def global_join_kb():
         [InlineKeyboardButton("🔀 تقسیم لینک‌ها", callback_data="g_join_split"),
          InlineKeyboardButton("📋 تمام لینک‌ها",  callback_data="g_join_all")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
+    ])
+
+# ─── ارسال زمان‌دار همگانی - منو ─────────────────────────────
+def global_sch_menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 ارسال زمان‌دار گروه‌ها", callback_data="gsch_panel_groups")],
+        [InlineKeyboardButton("💬 ارسال زمان‌دار پیوی‌ها", callback_data="gsch_panel_pvs")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
+    ])
+
+# ─── ارسال زمان‌دار همگانی - پنل (گروه/پیوی) ─────────────────
+def global_sch_panel_kb(target, active):
+    lbl = "🔴 خاموش کردن" if active else "🟢 روشن کردن"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 پیام ۱", callback_data=f"gsch_b1_{target}"),
+         InlineKeyboardButton("💬 پیام ۲", callback_data=f"gsch_b2_{target}")],
+        [InlineKeyboardButton("💬 پیام ۳", callback_data=f"gsch_b3_{target}"),
+         InlineKeyboardButton("💬 پیام ۴", callback_data=f"gsch_b4_{target}")],
+        [InlineKeyboardButton("⏱ تنظیم زمان", callback_data=f"gsch_time_{target}"),
+         InlineKeyboardButton(lbl, callback_data=f"gsch_tog_{target}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="g_sch_menu")],
+    ])
+
+# ─── بنر زمان‌دار همگانی ─────────────────────────────────────
+def global_banner_slot_kb(target, slot):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🗑 حذف پیام [{slot}]", callback_data=f"gbn_del_{target}_{slot}"),
+         InlineKeyboardButton("🗑 حذف همه",            callback_data=f"gbn_delall_{target}")],
+        [InlineKeyboardButton("📩 تنظیم/تغییر پیام",  callback_data=f"gbn_add_{target}_{slot}"),
+         InlineKeyboardButton("🔙 بازگشت",             callback_data=f"gbn_back_{target}")],
     ])
 
 # ─── تایید / لغو ────────────────────────────────────────────

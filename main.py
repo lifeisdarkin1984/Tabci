@@ -10,7 +10,7 @@ API_HASH  = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 from handlers import login, text_handler, callbacks
-from workers import secretary, scheduler, reply_worker, react_worker
+from workers import secretary, scheduler, reply_worker, react_worker, global_scheduler
 
 # توقف عملیات - global flag
 stop_flags = {}
@@ -37,6 +37,7 @@ async def main():
         scheduler.run(),
         reply_worker.run(),
         react_worker.run(),
+        global_scheduler.run(),
         idle(),
     )
 

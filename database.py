@@ -107,6 +107,25 @@ def init_db():
             is_active TINYINT DEFAULT 0,
             last_run BIGINT DEFAULT 0
         )""",
+        """CREATE TABLE IF NOT EXISTS global_scheduler (
+            admin_id BIGINT,
+            target VARCHAR(10) NOT NULL,
+            interval_minutes INT DEFAULT 60,
+            is_active TINYINT DEFAULT 0,
+            last_run BIGINT DEFAULT 0,
+            last_index INT DEFAULT 0,
+            PRIMARY KEY (admin_id, target)
+        )""",
+        """CREATE TABLE IF NOT EXISTS global_banners (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            target VARCHAR(10) NOT NULL,
+            slot INT DEFAULT 1,
+            text MEDIUMTEXT,
+            file_id VARCHAR(300) DEFAULT '',
+            file_type VARCHAR(30) DEFAULT '',
+            UNIQUE KEY uniq_slot (admin_id, target, slot)
+        )""",
     ]
     for s in stmts:
         try:
