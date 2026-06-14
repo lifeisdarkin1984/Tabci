@@ -7,10 +7,7 @@ from database import q
 from utils import ADMIN_ID, get_user_client, get_step, set_step, clear_step
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY
-)
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 SYSTEM_PROMPT = """تو دستیار هوشمند مدیریت تبچی هستی.
 اطلاعات اکانت‌ها و وضعیت سرویس‌ها رو داری.
@@ -66,8 +63,11 @@ async def _read_pvs(acc_id, limit=10):
 
 async def _call_gemini(user_msg: str, context: str) -> str:
     """ارسال به Gemini و دریافت جواب"""
-    if not GEMINI_API_KEY:
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
         return "❌ GEMINI_API_KEY تنظیم نشده. آن را در Railway environment variables اضافه کنید."
+
+    url = f"{GEMINI_BASE_URL}?key={api_key}"
 
     payload = json.dumps({
         "contents": [
@@ -81,7 +81,7 @@ async def _call_gemini(user_msg: str, context: str) -> str:
     }).encode()
 
     req = urllib.request.Request(
-        GEMINI_URL,
+        url,
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST"
@@ -135,3 +135,4 @@ def register(app):
         context = await _build_context()
         answer = await _call_gemini(user_text, context + pvs_text)
         await message.reply(f"🤖 {answer}")
+    
