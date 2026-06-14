@@ -20,9 +20,6 @@ def register(app):
         step = get_step(ADMIN_ID)
         text = message.text.strip()
 
-        if step == "assistant":
-            return
-
         if step == "login_phone":
             if not text.startswith("+"):
                 await message.reply("❌ شماره باید با + شروع شود.\nمثال: `+989123456789`")

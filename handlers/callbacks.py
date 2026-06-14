@@ -666,20 +666,6 @@ def register(app):
                     ])
                 )
 
-            elif d == "g_assistant":
-                from utils import set_step
-                set_step(ADMIN_ID, "assistant")
-                await cb.message.edit_text(
-                    "🤖 **دستیار هوشمند تبچی**\n\n"
-                    "می‌تونی ازم بپرسی:\n"
-                    "• چند گروه دارم؟\n"
-                    "• کدوم اکانتم فعاله؟\n"
-                    "• زمان‌بند کدوم اکانت روشنه؟\n"
-                    "• پیوی‌هام رو بخون\n\n"
-                    "برای خروج بنویس: بازگشت",
-                    reply_markup=back_kb("menu_global")
-                )
-
             elif d == "g_sec":
                 row = q("SELECT COUNT(*) FROM secretary WHERE is_active=1 AND admin_id=%s", (ADMIN_ID,))
                 active = (row[0][0] if row else 0) > 0
