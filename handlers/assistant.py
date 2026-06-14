@@ -61,7 +61,7 @@ async def _call_ai(user_msg: str, context: str) -> str:
         return "❌ OPENROUTER_API_KEY تنظیم نشده در Railway."
 
     payload = json.dumps({
-        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "model": "google/gemma-3-4b-it:free",
         "messages": [
             {"role": "system", "content": f"{SYSTEM_PROMPT}\n\nاطلاعات فعلی:\n{context}"},
             {"role": "user", "content": user_msg}
