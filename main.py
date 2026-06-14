@@ -1,7 +1,7 @@
 import asyncio, os
 from pyrogram import Client, idle
 from dotenv import load_dotenv
-from database import init_db, update_db
+from database import init_db
 
 load_dotenv()
 
@@ -17,7 +17,6 @@ stop_flags = {}
 
 async def main():
     init_db()
-    update_db()
 
     app = Client(
         "tabchi_bot",
