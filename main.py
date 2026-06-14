@@ -9,7 +9,7 @@ API_ID    = int(os.environ["API_ID"])
 API_HASH  = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
-from handlers import login, text_handler, callbacks, assistant
+from handlers import login, text_handler, callbacks
 from workers import secretary, scheduler, reply_worker, react_worker
 
 # توقف عملیات - global flag
@@ -26,7 +26,6 @@ async def main():
     )
 
     login.register(app)
-    assistant.register(app)
     text_handler.register(app)
     callbacks.register(app)
 
