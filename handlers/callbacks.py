@@ -488,7 +488,8 @@ def register(app):
             elif d.startswith("rr_setmsg_"):
                 acc_id = d[10:]
                 set_step(ADMIN_ID, f"rr_msg_{acc_id}")
-                await cb.message.edit_text("✏️ متن پیام ریپلای:", reply_markup=back_kb(f"m_reply_{acc_id}"))
+                back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+                await cb.message.edit_text("✏️ متن پیام ریپلای:", reply_markup=back_kb(back))
 
             elif d.startswith("rr_time_"):
                 acc_id = d[8:]
@@ -501,9 +502,12 @@ def register(app):
                 new = 0 if (row[0][0] if row else 0) else 1
                 u("INSERT INTO reply_rand (account_id,admin_id,is_active) VALUES(%s,%s,%s) "
                   "ON DUPLICATE KEY UPDATE is_active=%s", (acc_id, ADMIN_ID, new, new))
+                if new:
+                    set_stop(False); rw.STOP_FLAG = False
                 await cb.answer(f"ریپلای {'فعال' if new else 'غیرفعال'} شد")
                 row2 = q("SELECT is_active FROM reply_rand WHERE account_id=%s", (acc_id,))
-                await cb.message.edit_reply_markup(reply_rand_kb(acc_id, row2[0][0]))
+                back = "menu_global" if acc_id == "global" else None
+                await cb.message.edit_reply_markup(reply_rand_kb(acc_id, row2[0][0], back_to=back))
 
             elif d.startswith("rr_run_"):
                 acc_id = d[7:]
@@ -511,8 +515,15 @@ def register(app):
                 if not row or not row[0][0]:
                     await cb.answer("❌ اول پیام تنظیم کنید", show_alert=True); return
                 set_stop(False); rw.STOP_FLAG = False
-                await cb.answer("🚀 شروع شد")
-                asyncio.create_task(rw.run_once(acc_id, row[0][0]))
+                if acc_id == "global":
+                    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                    for (aid,) in accs:
+                        asyncio.create_task(rw.run_once(aid, row[0][0]))
+                    await cb.answer(f"🚀 برای {len(accs)} اکانت شروع شد", show_alert=True)
+                else:
+                    await cb.answer("🚀 شروع شد")
+                    asyncio.create_task(rw.run_once(acc_id, row[0][0]))
+
 
             # ══ ری‌اکت رندم ══
             elif d.startswith("m_react_"):
@@ -535,15 +546,24 @@ def register(app):
                 new = 0 if (row[0][0] if row else 0) else 1
                 u("INSERT INTO react_rand (account_id,admin_id,is_active) VALUES(%s,%s,%s) "
                   "ON DUPLICATE KEY UPDATE is_active=%s", (acc_id, ADMIN_ID, new, new))
+                if new:
+                    set_stop(False); rcw.STOP_FLAG = False
                 await cb.answer(f"ری‌اکت {'فعال' if new else 'غیرفعال'} شد")
                 row2 = q("SELECT is_active FROM react_rand WHERE account_id=%s", (acc_id,))
-                await cb.message.edit_reply_markup(react_rand_kb(acc_id, row2[0][0]))
+                back = "menu_global" if acc_id == "global" else None
+                await cb.message.edit_reply_markup(react_rand_kb(acc_id, row2[0][0], back_to=back))
 
             elif d.startswith("rc_run_"):
                 acc_id = d[7:]
                 set_stop(False); rcw.STOP_FLAG = False
-                await cb.answer("🚀 شروع شد")
-                asyncio.create_task(rcw.run_once(acc_id))
+                if acc_id == "global":
+                    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                    for (aid,) in accs:
+                        asyncio.create_task(rcw.run_once(aid))
+                    await cb.answer(f"🚀 برای {len(accs)} اکانت شروع شد", show_alert=True)
+                else:
+                    await cb.answer("🚀 شروع شد")
+                    asyncio.create_task(rcw.run_once(acc_id))
 
             # ══ global ══
             elif d == "g_stats":
@@ -781,38 +801,30 @@ def register(app):
                 await cb.answer(f"منشی همگانی {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
 
             elif d == "g_rr":
+                row = q("SELECT is_active,interval_minutes,message_text FROM reply_rand WHERE account_id='global'")
+                active = row[0][0] if row else 0
+                interval = row[0][1] if row else 30
+                msg = (row[0][2] if row else "") or "تنظیم نشده"
                 await cb.message.edit_text(
-                    "↩️ **ریپلای رندم همگانی**",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("▶️ اجرای دستی همه", callback_data="g_rr_run")],
-                        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")]
-                    ])
+                    f"↩️ **ریپلای رندم همگانی**\n\n"
+                    f"این تنظیم برای **همه اکانت‌ها** یکسان اعمال می‌شود؛ "
+                    f"هر اکانت مستقل با همین متن و زمان ریپلای می‌زند.\n\n"
+                    f"پیام: {msg}\nفاصله: {interval} دقیقه\nوضعیت: {'✅' if active else '❌'}",
+                    reply_markup=reply_rand_kb("global", active, back_to="menu_global")
                 )
-
-            elif d == "g_rr_run":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
-                set_stop(False); rw.STOP_FLAG = False
-                for (aid,) in accs:
-                    row = q("SELECT message_text FROM reply_rand WHERE account_id=%s", (aid,))
-                    if row and row[0][0]:
-                        asyncio.create_task(rw.run_once(aid, row[0][0]))
-                await cb.answer(f"✅ برای {len(accs)} اکانت شروع شد", show_alert=True)
 
             elif d == "g_rc":
+                row = q("SELECT is_active,interval_minutes FROM react_rand WHERE account_id='global'")
+                active = row[0][0] if row else 0
+                interval = row[0][1] if row else 30
                 await cb.message.edit_text(
-                    "😀 **ری‌اکت رندم همگانی**",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("▶️ اجرای دستی همه", callback_data="g_rc_run")],
-                        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")]
-                    ])
+                    f"😀 **ری‌اکت رندم همگانی**\n\n"
+                    f"این تنظیم برای **همه اکانت‌ها** یکسان اعمال می‌شود؛ "
+                    f"هر اکانت مستقل ری‌اکت می‌زند.\n\n"
+                    f"فاصله: {interval} دقیقه\nوضعیت: {'✅' if active else '❌'}",
+                    reply_markup=react_rand_kb("global", active, back_to="menu_global")
                 )
 
-            elif d == "g_rc_run":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
-                set_stop(False); rcw.STOP_FLAG = False
-                for (aid,) in accs:
-                    asyncio.create_task(rcw.run_once(aid))
-                await cb.answer(f"✅ برای {len(accs)} اکانت شروع شد", show_alert=True)
 
         except Exception as e:
             print(f"[CB ERROR] {d}: {e}")

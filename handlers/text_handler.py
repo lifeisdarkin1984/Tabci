@@ -278,7 +278,8 @@ def register(app):
               "ON DUPLICATE KEY UPDATE message_text=%s", (acc_id, ADMIN_ID, text, text))
             row = q("SELECT is_active FROM reply_rand WHERE account_id=%s", (acc_id,))
             active = row[0][0] if row else 0
-            await message.reply("✅ متن ریپلای تنظیم شد.", reply_markup=reply_rand_kb(acc_id, active))
+            back = "menu_global" if acc_id == "global" else None
+            await message.reply("✅ متن ریپلای تنظیم شد.", reply_markup=reply_rand_kb(acc_id, active, back_to=back))
             clear_step(ADMIN_ID)
 
         elif step.startswith("rr_int_"):
@@ -289,7 +290,8 @@ def register(app):
               "ON DUPLICATE KEY UPDATE interval_minutes=%s", (acc_id, ADMIN_ID, int(text), int(text)))
             row = q("SELECT is_active FROM reply_rand WHERE account_id=%s", (acc_id,))
             active = row[0][0] if row else 0
-            await message.reply(f"✅ هر {text} دقیقه ریپلای.", reply_markup=reply_rand_kb(acc_id, active))
+            back = "menu_global" if acc_id == "global" else None
+            await message.reply(f"✅ هر {text} دقیقه ریپلای.", reply_markup=reply_rand_kb(acc_id, active, back_to=back))
             clear_step(ADMIN_ID)
 
         elif step.startswith("rc_int_"):
@@ -300,7 +302,8 @@ def register(app):
               "ON DUPLICATE KEY UPDATE interval_minutes=%s", (acc_id, ADMIN_ID, int(text), int(text)))
             row = q("SELECT is_active FROM react_rand WHERE account_id=%s", (acc_id,))
             active = row[0][0] if row else 0
-            await message.reply(f"✅ هر {text} دقیقه ری‌اکت.", reply_markup=react_rand_kb(acc_id, active))
+            back = "menu_global" if acc_id == "global" else None
+            await message.reply(f"✅ هر {text} دقیقه ری‌اکت.", reply_markup=react_rand_kb(acc_id, active, back_to=back))
             clear_step(ADMIN_ID)
 
 
