@@ -117,24 +117,26 @@ def scheduler_kb(acc_id, active):
     ])
 
 # ─── ریپلای رندم ────────────────────────────────────────────
-def reply_rand_kb(acc_id, active):
+def reply_rand_kb(acc_id, active, back_to=None):
     lbl = "🔴 غیرفعال" if active else "🟢 فعال"
+    back = back_to or f"acc_manage_{acc_id}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ تنظیم متن پیام",   callback_data=f"rr_setmsg_{acc_id}")],
         [InlineKeyboardButton("⏱ تنظیم زمان",        callback_data=f"rr_time_{acc_id}"),
          InlineKeyboardButton(lbl,                    callback_data=f"rr_tog_{acc_id}")],
         [InlineKeyboardButton("▶️ اجرای دستی",       callback_data=f"rr_run_{acc_id}")],
-        [InlineKeyboardButton("🔙 بازگشت",            callback_data=f"acc_manage_{acc_id}")],
+        [InlineKeyboardButton("🔙 بازگشت",            callback_data=back)],
     ])
 
 # ─── ری‌اکت رندم ────────────────────────────────────────────
-def react_rand_kb(acc_id, active):
+def react_rand_kb(acc_id, active, back_to=None):
     lbl = "🔴 غیرفعال" if active else "🟢 فعال"
+    back = back_to or f"acc_manage_{acc_id}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⏱ تنظیم زمان",  callback_data=f"rc_time_{acc_id}"),
          InlineKeyboardButton(lbl,              callback_data=f"rc_tog_{acc_id}")],
         [InlineKeyboardButton("▶️ اجرای دستی", callback_data=f"rc_run_{acc_id}")],
-        [InlineKeyboardButton("🔙 بازگشت",      callback_data=f"acc_manage_{acc_id}")],
+        [InlineKeyboardButton("🔙 بازگشت",      callback_data=back)],
     ])
 
 # ─── استخراج لینک ───────────────────────────────────────────
