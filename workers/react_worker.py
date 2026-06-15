@@ -84,6 +84,8 @@ async def run():
         try:
             STOP_FLAG = False
             now = int(time.time())
+
+            # ── تنظیمات تک‌اکانت ──
             jobs = q(
                 "SELECT r.account_id, r.interval_minutes, r.last_run "
                 "FROM react_rand r "
@@ -98,6 +100,27 @@ async def run():
                     continue
                 await run_once(acc_id)
                 u("UPDATE react_rand SET last_run=%s WHERE account_id=%s", (now, acc_id))
+
+            # ── تنظیمات همگانی (account_id='global') ──
+            grow = q(
+                "SELECT interval_minutes, last_run FROM react_rand "
+                "WHERE account_id='global' AND admin_id=%s AND is_active=1",
+                (ADMIN_ID,)
+            )
+            if grow:
+                interval_min, last_run = grow[0]
+                if now - last_run >= interval_min * 60:
+                    accs = q(
+                        "SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
+                        (ADMIN_ID,)
+                    )
+                    for (acc_id,) in accs:
+                        if STOP_FLAG:
+                            break
+                        await run_once(acc_id)
+                    u("UPDATE react_rand SET last_run=%s WHERE account_id='global' AND admin_id=%s",
+                      (now, ADMIN_ID))
+
         except Exception as e:
             print(f"[ReactWorker] خطای کلی: {e}")
         await asyncio.sleep(60)
