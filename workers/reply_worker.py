@@ -2,39 +2,43 @@ import asyncio, random, time
 from pyrogram import enums
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired, FloodWait
 from database import q, u
-from utils import get_user_client, ADMIN_ID
+from utils import get_user_client, ADMIN_ID, record_flood, is_in_cooldown, reset_flood
 
 STOP_FLAG = False
 
-async def run_once(acc_id, message_text, bot_client=None):
+async def run_once(acc_id, message_text):
+    if is_in_cooldown(acc_id):
+        print(f"[ReplyWorker] اکانت {acc_id} در cooldown است، رد شد")
+        return
     uc = await get_user_client(acc_id)
     if not uc:
         return
     try:
         await uc.start()
-        me = await uc.get_me()
+
+        # گرفتن گروه‌ها و مرتب‌سازی بر اساس آخرین پیام (فعال‌ترین اول)
+        dialogs = []
         async for dlg in uc.get_dialogs():
-            if STOP_FLAG:
-                break
             if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
                 continue
+            last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
+            dialogs.append((last_ts, dlg))
+        dialogs.sort(key=lambda x: x[0], reverse=True)
+
+        for _, dlg in dialogs:
+            if STOP_FLAG:
+                break
             try:
-                # گرفتن ۱۰ پیام آخر
                 valid_msgs = []
                 async for msg in uc.get_chat_history(dlg.chat.id, limit=10):
-                    if STOP_FLAG:
-                        break
-                    # فیلتر ربات، ادمین، سرویس
-                    if not msg.from_user:
-                        continue
-                    if msg.from_user.is_bot:
-                        continue
-                    if msg.service:
-                        continue
-                    # چک ادمین بودن
+                    if STOP_FLAG: break
+                    if not msg.from_user: continue
+                    if msg.from_user.is_bot: continue
+                    if msg.service: continue
                     try:
                         member = await uc.get_chat_member(dlg.chat.id, msg.from_user.id)
-                        if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+                        if member.status in (enums.ChatMemberStatus.ADMINISTRATOR,
+                                             enums.ChatMemberStatus.OWNER):
                             continue
                     except Exception:
                         pass
@@ -44,10 +48,16 @@ async def run_once(acc_id, message_text, bot_client=None):
                     continue
 
                 target = random.choice(valid_msgs)
-                await uc.send_message(dlg.chat.id, message_text, reply_to_message_id=target.id)
-                await asyncio.sleep(random.uniform(2, 5))
+                await uc.send_message(dlg.chat.id, message_text,
+                                       reply_to_message_id=target.id)
+                reset_flood(acc_id)
+                # فاصله تصادفی بین گروه‌ها
+                await asyncio.sleep(random.uniform(3, 8))
 
             except FloodWait as e:
+                entered_cooldown = record_flood(acc_id)
+                if entered_cooldown:
+                    break
                 await asyncio.sleep(e.value * 2)
             except Exception:
                 continue
@@ -55,16 +65,12 @@ async def run_once(acc_id, message_text, bot_client=None):
         await uc.stop()
     except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
         u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
-        try:
-            await uc.stop()
-        except Exception:
-            pass
+        try: await uc.stop()
+        except Exception: pass
     except Exception as e:
         print(f"[ReplyWorker] خطا در {acc_id}: {e}")
-        try:
-            await uc.stop()
-        except Exception:
-            pass
+        try: await uc.stop()
+        except Exception: pass
 
 async def _get_next_banner(acc_id):
     """پیام بعدی را به ترتیب از جدول بنرها برمی‌گرداند"""

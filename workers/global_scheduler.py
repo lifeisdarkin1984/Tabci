@@ -2,7 +2,7 @@ import asyncio, time, random
 from pyrogram import enums
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired, FloodWait
 from database import q, u
-from utils import get_user_client, ADMIN_ID, is_stopped
+from utils import get_user_client, ADMIN_ID, is_stopped, record_flood, is_in_cooldown, reset_flood
 
 
 async def _send_banner(uc, chat_id, bt, bf, bft):
@@ -53,36 +53,48 @@ async def _run_for_target(target):
     for (acc_id,) in accs:
         if is_stopped():
             break
+        if is_in_cooldown(acc_id):
+            print(f"[GlobalScheduler:{target}] اکانت {acc_id} در cooldown، رد شد")
+            continue
         uc = await get_user_client(acc_id)
         if not uc:
             continue
         try:
             await uc.start()
+
+            # مرتب‌سازی — فعال‌ترین اول
+            dialogs = []
             async for dlg in uc.get_dialogs():
-                if is_stopped():
-                    break
                 if dlg.chat.type not in chat_type_filter:
                     continue
+                last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
+                dialogs.append((last_ts, dlg))
+            dialogs.sort(key=lambda x: x[0], reverse=True)
+
+            for _, dlg in dialogs:
+                if is_stopped():
+                    break
                 try:
                     await _send_banner(uc, dlg.chat.id, bt, bf, bft)
-                    await asyncio.sleep(random.uniform(1, 2))
+                    reset_flood(acc_id)
+                    await asyncio.sleep(random.uniform(1.5, 4))
                 except FloodWait as e:
+                    entered = record_flood(acc_id)
+                    if entered:
+                        break
                     await asyncio.sleep(min(e.value, 60))
                 except Exception:
                     pass
+
             await uc.stop()
         except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
             u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
-            try:
-                await uc.stop()
-            except Exception:
-                pass
+            try: await uc.stop()
+            except Exception: pass
         except Exception as e:
-            print(f"[GlobalScheduler:{target}] خطا در اکانت {acc_id}: {e}")
-            try:
-                await uc.stop()
-            except Exception:
-                pass
+            print(f"[GlobalScheduler:{target}] خطا در {acc_id}: {e}")
+            try: await uc.stop()
+            except Exception: pass
 
     u(
         "UPDATE global_scheduler SET last_run=%s, last_index=%s "

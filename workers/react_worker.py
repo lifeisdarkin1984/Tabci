@@ -1,9 +1,8 @@
 import asyncio, random, time
 from pyrogram import enums
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired, FloodWait
-from pyrogram.raw import functions, types
 from database import q, u
-from utils import get_user_client, ADMIN_ID
+from utils import get_user_client, ADMIN_ID, record_flood, is_in_cooldown, reset_flood
 
 STOP_FLAG = False
 
@@ -19,30 +18,38 @@ async def get_available_reactions(uc, chat_id):
     return FALLBACK_EMOJIS
 
 async def run_once(acc_id):
+    if is_in_cooldown(acc_id):
+        print(f"[ReactWorker] اکانت {acc_id} در cooldown است، رد شد")
+        return
     uc = await get_user_client(acc_id)
     if not uc:
         return
     try:
         await uc.start()
+
+        # مرتب‌سازی گروه‌ها بر اساس آخرین پیام (فعال‌ترین اول)
+        dialogs = []
         async for dlg in uc.get_dialogs():
-            if STOP_FLAG:
-                break
             if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
                 continue
+            last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
+            dialogs.append((last_ts, dlg))
+        dialogs.sort(key=lambda x: x[0], reverse=True)
+
+        for _, dlg in dialogs:
+            if STOP_FLAG:
+                break
             try:
                 valid_msgs = []
                 async for msg in uc.get_chat_history(dlg.chat.id, limit=10):
-                    if STOP_FLAG:
-                        break
-                    if not msg.from_user:
-                        continue
-                    if msg.from_user.is_bot:
-                        continue
-                    if msg.service:
-                        continue
+                    if STOP_FLAG: break
+                    if not msg.from_user: continue
+                    if msg.from_user.is_bot: continue
+                    if msg.service: continue
                     try:
                         member = await uc.get_chat_member(dlg.chat.id, msg.from_user.id)
-                        if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
+                        if member.status in (enums.ChatMemberStatus.ADMINISTRATOR,
+                                             enums.ChatMemberStatus.OWNER):
                             continue
                     except Exception:
                         pass
@@ -54,11 +61,15 @@ async def run_once(acc_id):
                 target = random.choice(valid_msgs)
                 reactions = await get_available_reactions(uc, dlg.chat.id)
                 emoji = random.choice(reactions)
-
                 await uc.send_reaction(dlg.chat.id, target.id, emoji)
-                await asyncio.sleep(random.uniform(2, 5))
+                reset_flood(acc_id)
+                # فاصله تصادفی بین گروه‌ها
+                await asyncio.sleep(random.uniform(3, 8))
 
             except FloodWait as e:
+                entered_cooldown = record_flood(acc_id)
+                if entered_cooldown:
+                    break
                 await asyncio.sleep(e.value * 2)
             except Exception:
                 continue
@@ -66,16 +77,12 @@ async def run_once(acc_id):
         await uc.stop()
     except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
         u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
-        try:
-            await uc.stop()
-        except Exception:
-            pass
+        try: await uc.stop()
+        except Exception: pass
     except Exception as e:
         print(f"[ReactWorker] خطا در {acc_id}: {e}")
-        try:
-            await uc.stop()
-        except Exception:
-            pass
+        try: await uc.stop()
+        except Exception: pass
 
 async def run():
     global STOP_FLAG
