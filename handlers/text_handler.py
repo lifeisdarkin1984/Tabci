@@ -407,25 +407,54 @@ async def _extract_links(acc_id, channel, limit):
     uc = await get_user_client(acc_id)
     if not uc:
         return []
-    pattern = re.compile(r'(https?://t\.me/\S+|@[\w]{4,})')
+    pattern = re.compile(r'https?://t\.me/[^\s\]\)\"\']+')
     links = []
     try:
         await uc.start()
         async for msg in uc.get_chat_history(channel, limit=limit):
-            # متن پیام
+            # ۱. متن پیام
             txt = (msg.text or "") + " " + (msg.caption or "")
             links += pattern.findall(txt)
-            # دکمه‌های inline
-            if msg.reply_markup and hasattr(msg.reply_markup, 'inline_keyboard'):
-                for row in msg.reply_markup.inline_keyboard:
-                    for btn in row:
-                        if btn.url:
-                            found = pattern.findall(btn.url)
-                            links += found
+
+            # ۲. entities (لینک‌های کلیک‌پذیر داخل متن)
+            for entities in [msg.entities or [], msg.caption_entities or []]:
+                for e in entities:
+                    if hasattr(e, 'url') and e.url:
+                        links += pattern.findall(e.url)
+
+            # ۳. دکمه‌های inline
+            if msg.reply_markup:
+                try:
+                    kb = msg.reply_markup
+                    rows = getattr(kb, 'inline_keyboard', None)
+                    if rows:
+                        for row in rows:
+                            for btn in row:
+                                url = getattr(btn, 'url', None)
+                                if url:
+                                    links += pattern.findall(url)
+                except Exception:
+                    pass
+
+            # ۴. web preview
+            if msg.web_page and hasattr(msg.web_page, 'url') and msg.web_page.url:
+                links += pattern.findall(msg.web_page.url)
+
         await uc.stop()
-    except Exception:
-        pass
-    return list(dict.fromkeys(links))
+    except Exception as ex:
+        print(f"[ExtractLinks] {ex}")
+        try:
+            await uc.stop()
+        except Exception:
+            pass
+
+    # پاکسازی: حذف کاراکترهای اضافی از انتها
+    cleaned = []
+    for lnk in links:
+        lnk = lnk.rstrip('.,;:!?)\"\'')
+        if lnk not in cleaned:
+            cleaned.append(lnk)
+    return cleaned
 
 
 async def _join_links(bot_client, acc_id, links, min_d, max_d):
