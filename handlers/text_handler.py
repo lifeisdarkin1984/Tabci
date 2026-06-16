@@ -529,9 +529,15 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d):
 async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
     """ارسال پیام هوشمند با تشخیص محدودیت و عضویت اجبار"""
     from pyrogram import enums as en
+    from utils import record_flood, is_in_cooldown, reset_flood
     uc = await get_user_client(acc_id)
     if not uc:
         return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0}
+
+    if is_in_cooldown(acc_id):
+        return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0,
+                "display": acc_id, "skipped": True}
+
     me_info = q("SELECT phone, auto_leave_limited FROM accounts WHERE id=%s", (acc_id,))
     display = me_info[0][0] if me_info else acc_id
     auto_leave = me_info[0][1] if me_info else 0
@@ -541,20 +547,28 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
     ok = fail = limited = force_joined = left = 0
     await uc.start()
 
+    # مرتب‌سازی گروه‌ها — فعال‌ترین اول
+    dialogs = []
     async for dlg in uc.get_dialogs():
-        if is_stopped():
-            break
         if dlg.chat.type not in (en.ChatType.GROUP, en.ChatType.SUPERGROUP):
             continue
+        last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
+        dialogs.append((last_ts, dlg))
+    dialogs.sort(key=lambda x: x[0], reverse=True)
+
+    for _, dlg in dialogs:
+        if is_stopped():
+            break
         try:
             await uc.send_message(dlg.chat.id, text)
             ok += 1
-            await asyncio.sleep(2)
+            reset_flood(acc_id)
+            # فاصله تصادفی بین گروه‌ها
+            await asyncio.sleep(random.uniform(1.5, 4))
 
         except (ChatWriteForbidden, UserBannedInChannel, ChatRestricted,
                 ChatSendMediaForbidden) as e:
             err_str = str(e)
-            # تشخیص عضویت اجبار
             fj_match = re.search(r'@([\w]+)|t\.me/([\w+]+)', err_str)
             if do_force_join and fj_match:
                 ch = fj_match.group(1) or fj_match.group(2)
@@ -568,48 +582,43 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
                     fail += 1
                     if auto_leave:
                         try:
-                            await uc.leave_chat(dlg.chat.id)
-                            left += 1
-                        except Exception:
-                            pass
+                            await uc.leave_chat(dlg.chat.id); left += 1
+                        except Exception: pass
                         limited += 1
             elif auto_leave:
                 try:
-                    await uc.leave_chat(dlg.chat.id)
-                    left += 1
-                except Exception:
-                    pass
+                    await uc.leave_chat(dlg.chat.id); left += 1
+                except Exception: pass
                 limited += 1
             else:
                 limited += 1
 
-        except SlowmodeWait as e:
-            # محدودیت موقت - گروه را خارج نکن، فقط رد کن
+        except SlowmodeWait:
             limited += 1
 
         except FloodWait as e:
+            entered_cooldown = record_flood(acc_id)
             await bot_client.send_message(
-                ADMIN_ID,
-                f"❗️ محدودیت {e.value} ثانیه\n👤 {display}"
+                ADMIN_ID, f"❗️ محدودیت {e.value} ثانیه\n👤 {display}"
             )
+            if entered_cooldown:
+                await bot_client.send_message(
+                    ADMIN_ID,
+                    f"⚠️ اکانت {display} بعد از چند FloodWait وارد حالت استراحت ۲ ساعته شد."
+                )
+                break
             await asyncio.sleep(e.value * 2)
             try:
-                await uc.send_message(dlg.chat.id, text)
-                ok += 1
-            except Exception:
-                fail += 1
+                await uc.send_message(dlg.chat.id, text); ok += 1
+            except Exception: fail += 1
 
         except RPCError as e:
-            # هر خطای دیگه‌ی تلگرام که نشون‌دهنده محدودیت ارسال است
             err_str = str(e).lower()
-            restriction_keywords = ["forbidden", "banned", "restricted", "not_muted", "rights"]
-            if any(k in err_str for k in restriction_keywords):
+            if any(k in err_str for k in ["forbidden","banned","restricted","rights"]):
                 if auto_leave:
                     try:
-                        await uc.leave_chat(dlg.chat.id)
-                        left += 1
-                    except Exception:
-                        pass
+                        await uc.leave_chat(dlg.chat.id); left += 1
+                    except Exception: pass
                 limited += 1
             else:
                 fail += 1
