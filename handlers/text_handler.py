@@ -8,7 +8,7 @@ from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
                    clear_step, get_user_client, save_account, is_stopped, set_stop)
-from keyboards import manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb, react_rand_kb
+from keyboards import manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb, react_rand_kb, reply_banner_list_kb
 from handlers.login import send_code, sign_in
 
 def register(app):
@@ -272,14 +272,17 @@ def register(app):
                 reply_markup=global_join_kb()
             )
 
-        elif step.startswith("rr_msg_"):
-            acc_id = step[7:]
-            u("INSERT INTO reply_rand (account_id,admin_id,message_text) VALUES(%s,%s,%s) "
-              "ON DUPLICATE KEY UPDATE message_text=%s", (acc_id, ADMIN_ID, text, text))
-            row = q("SELECT is_active FROM reply_rand WHERE account_id=%s", (acc_id,))
-            active = row[0][0] if row else 0
-            back = "menu_global" if acc_id == "global" else None
-            await message.reply("✅ متن ریپلای تنظیم شد.", reply_markup=reply_rand_kb(acc_id, active, back_to=back))
+        elif step.startswith("rr_badd_"):
+            acc_id = step[8:]
+            # پیدا کردن slot بعدی
+            rows = q("SELECT MAX(slot) FROM reply_rand_banners WHERE account_id=%s", (acc_id,))
+            next_slot = (rows[0][0] or 0) + 1
+            u("INSERT INTO reply_rand_banners (account_id,admin_id,slot,text) VALUES(%s,%s,%s,%s)",
+              (acc_id, ADMIN_ID, next_slot, text))
+            bnrs = q("SELECT slot,text,file_id FROM reply_rand_banners WHERE account_id=%s ORDER BY slot", (acc_id,))
+            back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+            await message.reply(f"✅ متن {next_slot} اضافه شد.",
+                                 reply_markup=reply_banner_list_kb(acc_id, bnrs, back_to=back))
             clear_step(ADMIN_ID)
 
         elif step.startswith("rr_int_"):

@@ -485,11 +485,47 @@ def register(app):
                     reply_markup=reply_rand_kb(acc_id, active)
                 )
 
-            elif d.startswith("rr_setmsg_"):
-                acc_id = d[10:]
-                set_step(ADMIN_ID, f"rr_msg_{acc_id}")
+            elif d.startswith("rr_banners_"):
+                acc_id = d[11:]
+                bnrs = q("SELECT slot,text,file_id FROM reply_rand_banners "
+                         "WHERE account_id=%s ORDER BY slot", (acc_id,))
                 back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
-                await cb.message.edit_text("✏️ متن پیام ریپلای:", reply_markup=back_kb(back))
+                txt = "📋 **مدیریت متن‌های ریپلای**\n\n"
+                if bnrs:
+                    for b in bnrs:
+                        short = (b[1] or "")[:40]
+                        txt += f"═-═ {b[0]} ═-═\n💬 {short}{'...' if b[1] and len(b[1])>40 else ''}\n📁 {'✅' if b[2] else '❌'}\n\n"
+                else:
+                    txt += "هیچ متنی تنظیم نشده."
+                txt += "\nهر دوره یکی به ترتیب شماره ارسال می‌شود."
+                await cb.message.edit_text(txt, reply_markup=reply_banner_list_kb(acc_id, bnrs, back_to=back))
+
+            elif d.startswith("rr_badd_"):
+                acc_id = d[8:]
+                set_step(ADMIN_ID, f"rr_badd_{acc_id}")
+                back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+                await cb.message.edit_text("📝 متن ریپلای جدید را وارد کنید:",
+                                            reply_markup=back_kb(f"rr_banners_{acc_id}"))
+
+            elif d.startswith("rr_bdel_"):
+                parts = d.split("_", 3)
+                acc_id, slot = parts[2], int(parts[3])
+                u("DELETE FROM reply_rand_banners WHERE account_id=%s AND slot=%s", (acc_id, slot))
+                # شماره‌گذاری مجدد
+                remaining = q("SELECT id FROM reply_rand_banners WHERE account_id=%s ORDER BY slot", (acc_id,))
+                for i, (rid,) in enumerate(remaining, 1):
+                    u("UPDATE reply_rand_banners SET slot=%s WHERE id=%s", (i, rid))
+                await cb.answer(f"✅ متن {slot} حذف شد")
+                bnrs = q("SELECT slot,text,file_id FROM reply_rand_banners WHERE account_id=%s ORDER BY slot", (acc_id,))
+                back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+                await cb.message.edit_reply_markup(reply_banner_list_kb(acc_id, bnrs, back_to=back))
+
+            elif d.startswith("rr_bdelall_"):
+                acc_id = d[11:]
+                u("DELETE FROM reply_rand_banners WHERE account_id=%s", (acc_id,))
+                await cb.answer("✅ همه متن‌ها حذف شدند")
+                back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+                await cb.message.edit_reply_markup(reply_banner_list_kb(acc_id, [], back_to=back))
 
             elif d.startswith("rr_time_"):
                 acc_id = d[8:]
@@ -511,18 +547,29 @@ def register(app):
 
             elif d.startswith("rr_run_"):
                 acc_id = d[7:]
-                row = q("SELECT message_text FROM reply_rand WHERE account_id=%s", (acc_id,))
-                if not row or not row[0][0]:
-                    await cb.answer("❌ اول پیام تنظیم کنید", show_alert=True); return
+                bnrs = q("SELECT text FROM reply_rand_banners WHERE account_id=%s ORDER BY slot", (acc_id,))
+                if not bnrs:
+                    await cb.answer("❌ اول متن تنظیم کنید", show_alert=True); return
                 set_stop(False); rw.STOP_FLAG = False
                 if acc_id == "global":
                     accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                    row = q("SELECT last_index FROM reply_rand WHERE account_id='global'")
+                    idx = (row[0][0] if row else 0) % len(bnrs)
+                    msg_text = bnrs[idx][0]
                     for (aid,) in accs:
-                        asyncio.create_task(rw.run_once(aid, row[0][0]))
+                        asyncio.create_task(rw.run_once(aid, msg_text))
+                    u("INSERT INTO reply_rand (account_id,admin_id,last_index) VALUES('global',%s,%s) "
+                      "ON DUPLICATE KEY UPDATE last_index=%s", (ADMIN_ID, idx+1, idx+1))
                     await cb.answer(f"🚀 برای {len(accs)} اکانت شروع شد", show_alert=True)
                 else:
+                    row = q("SELECT last_index FROM reply_rand WHERE account_id=%s", (acc_id,))
+                    idx = (row[0][0] if row else 0) % len(bnrs)
+                    msg_text = bnrs[idx][0]
+                    u("INSERT INTO reply_rand (account_id,admin_id,last_index) VALUES(%s,%s,%s) "
+                      "ON DUPLICATE KEY UPDATE last_index=%s", (acc_id, ADMIN_ID, idx+1, idx+1))
                     await cb.answer("🚀 شروع شد")
-                    asyncio.create_task(rw.run_once(acc_id, row[0][0]))
+                    asyncio.create_task(rw.run_once(acc_id, msg_text))
+
 
 
             # ══ ری‌اکت رندم ══
