@@ -412,8 +412,16 @@ async def _extract_links(acc_id, channel, limit):
     try:
         await uc.start()
         async for msg in uc.get_chat_history(channel, limit=limit):
+            # متن پیام
             txt = (msg.text or "") + " " + (msg.caption or "")
             links += pattern.findall(txt)
+            # دکمه‌های inline
+            if msg.reply_markup and hasattr(msg.reply_markup, 'inline_keyboard'):
+                for row in msg.reply_markup.inline_keyboard:
+                    for btn in row:
+                        if btn.url:
+                            found = pattern.findall(btn.url)
+                            links += found
         await uc.stop()
     except Exception:
         pass
