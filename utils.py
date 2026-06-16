@@ -54,3 +54,57 @@ def set_stop(val: bool):
 
 def is_stopped():
     return stop_all
+
+# ─── سیستم تشخیص خطر بن ──────────────────────
+# {acc_id: {"count": N, "cooldown_until": timestamp}}
+_flood_counters: dict = {}
+
+FLOOD_THRESHOLD = 5      # تعداد FloodWait پشت سر هم برای کنار گذاشتن
+COOLDOWN_HOURS  = 2      # مدت کنار گذاشتن (ساعت)
+
+def record_flood(acc_id: str) -> bool:
+    """
+    ثبت یک FloodWait برای اکانت.
+    اگر True برگرداند یعنی اکانت وارد cooldown شد.
+    """
+    now = int(time.time())
+    entry = _flood_counters.get(acc_id, {"count": 0, "cooldown_until": 0})
+
+    # اگه cooldown فعاله، چیزی تغییر نمیده
+    if entry["cooldown_until"] > now:
+        return True
+
+    entry["count"] += 1
+    if entry["count"] >= FLOOD_THRESHOLD:
+        entry["cooldown_until"] = now + COOLDOWN_HOURS * 3600
+        entry["count"] = 0
+        _flood_counters[acc_id] = entry
+        print(f"[BanGuard] اکانت {acc_id} وارد cooldown {COOLDOWN_HOURS} ساعته شد")
+        return True
+
+    _flood_counters[acc_id] = entry
+    return False
+
+def is_in_cooldown(acc_id: str) -> bool:
+    """True اگر اکانت الان در cooldown باشد"""
+    entry = _flood_counters.get(acc_id)
+    if not entry:
+        return False
+    if entry["cooldown_until"] > int(time.time()):
+        return True
+    # cooldown تموم شده، reset کن
+    _flood_counters.pop(acc_id, None)
+    return False
+
+def reset_flood(acc_id: str):
+    """بعد از عملیات موفق، counter رو reset کن"""
+    _flood_counters.pop(acc_id, None)
+
+def cooldown_remaining(acc_id: str) -> int:
+    """چند ثانیه تا پایان cooldown مانده"""
+    entry = _flood_counters.get(acc_id)
+    if not entry:
+        return 0
+    remaining = entry["cooldown_until"] - int(time.time())
+    return max(0, remaining)
+
