@@ -121,12 +121,29 @@ def reply_rand_kb(acc_id, active, back_to=None):
     lbl = "🔴 غیرفعال" if active else "🟢 فعال"
     back = back_to or f"acc_manage_{acc_id}"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ تنظیم متن پیام",   callback_data=f"rr_setmsg_{acc_id}")],
+        [InlineKeyboardButton("📋 مدیریت متن‌ها",     callback_data=f"rr_banners_{acc_id}")],
         [InlineKeyboardButton("⏱ تنظیم زمان",        callback_data=f"rr_time_{acc_id}"),
          InlineKeyboardButton(lbl,                    callback_data=f"rr_tog_{acc_id}")],
         [InlineKeyboardButton("▶️ اجرای دستی",       callback_data=f"rr_run_{acc_id}")],
         [InlineKeyboardButton("🔙 بازگشت",            callback_data=back)],
     ])
+
+def reply_banner_list_kb(acc_id, banners, back_to=None):
+    """نمایش لیست بنرهای ریپلای با امکان اضافه/حذف"""
+    back = back_to or f"m_reply_{acc_id}"
+    rows = []
+    for b in banners:
+        slot = b[0]
+        short = (b[1] or "")[:20]
+        rows.append([InlineKeyboardButton(
+            f"🗑 حذف [{slot}] {short}{'...' if b[1] and len(b[1])>20 else ''}",
+            callback_data=f"rr_bdel_{acc_id}_{slot}"
+        )])
+    rows.append([InlineKeyboardButton("➕ افزودن متن جدید", callback_data=f"rr_badd_{acc_id}")])
+    if banners:
+        rows.append([InlineKeyboardButton("🗑 حذف همه", callback_data=f"rr_bdelall_{acc_id}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=back)])
+    return InlineKeyboardMarkup(rows)
 
 # ─── ری‌اکت رندم ────────────────────────────────────────────
 def react_rand_kb(acc_id, active, back_to=None):

@@ -35,7 +35,7 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS admins (
             id BIGINT PRIMARY KEY,
             step VARCHAR(150) DEFAULT 'idle',
-            step_data VARCHAR(2000) DEFAULT ''
+            step_data MEDIUMTEXT
         )""",
         """CREATE TABLE IF NOT EXISTS accounts (
             id VARCHAR(50) PRIMARY KEY,
@@ -98,7 +98,18 @@ def init_db():
             message_text VARCHAR(2000) DEFAULT '',
             interval_minutes INT DEFAULT 30,
             is_active TINYINT DEFAULT 0,
-            last_run BIGINT DEFAULT 0
+            last_run BIGINT DEFAULT 0,
+            last_index INT DEFAULT 0
+        )""",
+        """CREATE TABLE IF NOT EXISTS reply_rand_banners (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            account_id VARCHAR(50),
+            admin_id BIGINT,
+            slot INT DEFAULT 1,
+            text MEDIUMTEXT,
+            file_id VARCHAR(300) DEFAULT '',
+            file_type VARCHAR(30) DEFAULT '',
+            UNIQUE KEY uniq_slot (account_id, slot)
         )""",
         """CREATE TABLE IF NOT EXISTS react_rand (
             account_id VARCHAR(50) PRIMARY KEY,
@@ -146,6 +157,7 @@ def init_db():
 
     new_columns = [
         ("accounts", "auto_leave_limited", "TINYINT DEFAULT 0"),
+        ("reply_rand", "last_index", "INT DEFAULT 0"),
     ]
     for table, col, definition in new_columns:
         if not column_exists(table, col):
@@ -154,6 +166,20 @@ def init_db():
                 print(f"[DB init] added column {col} to {table}")
             except Exception as e:
                 print(f"[DB init] {e}")
+
+    # تغییر نوع ستون‌های موجود
+    try:
+        cur.execute(
+            "SELECT DATA_TYPE FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='admins' AND COLUMN_NAME='step_data'",
+            (os.environ["MYSQLDATABASE"],)
+        )
+        row = cur.fetchone()
+        if row and row[0].lower() == 'varchar':
+            cur.execute("ALTER TABLE admins MODIFY COLUMN step_data MEDIUMTEXT")
+            print("[DB init] upgraded step_data to MEDIUMTEXT")
+    except Exception as e:
+        print(f"[DB init] {e}")
     db.commit()
     db.close()
     print("✅ DB ready")
