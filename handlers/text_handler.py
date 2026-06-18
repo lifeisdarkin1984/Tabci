@@ -236,11 +236,38 @@ def register(app):
               "VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE interval_minutes=%s",
               (ADMIN_ID, target, int(text), int(text)))
             from keyboards import global_sch_panel_kb
-            row = q("SELECT is_active FROM global_scheduler WHERE admin_id=%s AND target=%s",
-                    (ADMIN_ID, target))
+            row = q("SELECT is_active,group_tag_filter,acc_tag_filter,max_rounds,current_round "
+                    "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
             active = row[0][0] if row else 0
+            gtag = (row[0][1] if row else None) or "ALL"
+            atag = (row[0][2] if row else None) or "ALL"
+            max_r = row[0][3] if row else 0
+            cur_r = row[0][4] if row else 0
             await message.reply(f"✅ هر {text} دقیقه ارسال می‌شود.",
-                                 reply_markup=global_sch_panel_kb(target, active))
+                                 reply_markup=global_sch_panel_kb(target, active, gtag=gtag,
+                                     atag=atag, max_rounds=max_r, current_round=cur_r))
+            clear_step(ADMIN_ID)
+
+        elif step.startswith("gsch_rounds_"):
+            target = step[12:]
+            if not text.isdigit() or int(text) < 0:
+                await message.reply("❌ عدد معتبر وارد کنید (۰ = نامحدود)."); return
+            rounds = int(text)
+            u("INSERT INTO global_scheduler (admin_id,target,max_rounds,current_round) "
+              "VALUES(%s,%s,%s,0) ON DUPLICATE KEY UPDATE max_rounds=%s, current_round=0",
+              (ADMIN_ID, target, rounds, rounds))
+            from keyboards import global_sch_panel_kb
+            row = q("SELECT is_active,group_tag_filter,acc_tag_filter,max_rounds,current_round "
+                    "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+            active = row[0][0] if row else 0
+            gtag = (row[0][1] if row else None) or "ALL"
+            atag = (row[0][2] if row else None) or "ALL"
+            max_r = row[0][3] if row else 0
+            cur_r = row[0][4] if row else 0
+            lbl = "نامحدود" if rounds == 0 else f"{rounds} دور"
+            await message.reply(f"✅ تعداد دور: {lbl}",
+                                 reply_markup=global_sch_panel_kb(target, active, gtag=gtag,
+                                     atag=atag, max_rounds=max_r, current_round=cur_r))
             clear_step(ADMIN_ID)
 
         elif step == "g_bio":

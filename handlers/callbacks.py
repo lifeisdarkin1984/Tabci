@@ -939,18 +939,25 @@ def register(app):
 
             elif d.startswith("gsch_panel_"):
                 target = d[11:]
-                row = q("SELECT is_active, interval_minutes, group_tag_filter, acc_tag_filter "
-                        "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                row = q("SELECT is_active, interval_minutes, group_tag_filter, acc_tag_filter, "
+                        "max_rounds, current_round FROM global_scheduler "
+                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 60
                 gtag = (row[0][2] if row else None) or "ALL"
                 atag = (row[0][3] if row else None) or "ALL"
+                max_rounds = row[0][4] if row else 0
+                current_round = row[0][5] if row else 0
                 title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
                 bnrs = q("SELECT slot, text, file_id FROM global_banners "
                          "WHERE admin_id=%s AND target=%s ORDER BY slot", (ADMIN_ID, target))
                 txt = f"⏰ **ارسال زمان‌دار به {title}**\n\n"
                 txt += f"فاصله: هر {interval} دقیقه\nوضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n"
-                txt += f"🏷 گروه: {gtag} | 👤 اکانت: {atag}\n\n"
+                txt += f"🏷 گروه: {gtag} | 👤 اکانت: {atag}\n"
+                if max_rounds == 0:
+                    txt += "🔄 دور: نامحدود\n\n"
+                else:
+                    txt += f"🔄 دور: {current_round}/{max_rounds}\n\n"
                 for slot in (1, 2, 3, 4):
                     b = next((x for x in bnrs if x[0] == slot), None)
                     if b:
@@ -959,7 +966,18 @@ def register(app):
                     else:
                         txt += f"💬 پیام {slot}: تنظیم نشده\n"
                 txt += "\nهر دوره یکی از این پیام‌ها به‌ترتیب شماره ارسال می‌شود."
-                await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(target, active, gtag=gtag, atag=atag))
+                await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(
+                    target, active, gtag=gtag, atag=atag,
+                    max_rounds=max_rounds, current_round=current_round))
+
+            elif d.startswith("gsch_rounds_"):
+                target = d[12:]
+                set_step(ADMIN_ID, f"gsch_rounds_{target}")
+                await cb.message.edit_text(
+                    "🔄 تعداد دور را وارد کنید:\n\n"
+                    "`0` = نامحدود\n`1` = یک دور (۴ پیام)\n`2` = دو دور (۸ پیام)\n...",
+                    reply_markup=back_kb(f"gsch_panel_{target}")
+                )
 
             elif d.startswith("gsch_gtag_set_"):
                 rest = d[14:]
@@ -1014,14 +1032,25 @@ def register(app):
                 row = q("SELECT is_active FROM global_scheduler WHERE admin_id=%s AND target=%s",
                         (ADMIN_ID, target))
                 new = 0 if (row[0][0] if row else 0) else 1
-                u("INSERT INTO global_scheduler (admin_id,target,is_active) VALUES(%s,%s,%s) "
-                  "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, target, new, new))
                 if new:
+                    # روشن کردن — reset دور
+                    u("INSERT INTO global_scheduler (admin_id,target,is_active,current_round) "
+                      "VALUES(%s,%s,%s,0) ON DUPLICATE KEY UPDATE is_active=%s, current_round=0",
+                      (ADMIN_ID, target, new, new))
                     set_stop(False)
+                else:
+                    u("INSERT INTO global_scheduler (admin_id,target,is_active) VALUES(%s,%s,%s) "
+                      "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, target, new, new))
                 await cb.answer(f"ارسال زمان‌دار {'فعال' if new else 'غیرفعال'} شد")
-                row2 = q("SELECT is_active FROM global_scheduler WHERE admin_id=%s AND target=%s",
-                         (ADMIN_ID, target))
-                await cb.message.edit_reply_markup(global_sch_panel_kb(target, row2[0][0]))
+                row2 = q("SELECT is_active,group_tag_filter,acc_tag_filter,max_rounds,current_round "
+                         "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                active = row2[0][0] if row2 else 0
+                gtag = (row2[0][1] if row2 else None) or "ALL"
+                atag = (row2[0][2] if row2 else None) or "ALL"
+                max_r = row2[0][3] if row2 else 0
+                cur_r = row2[0][4] if row2 else 0
+                await cb.message.edit_reply_markup(global_sch_panel_kb(
+                    target, active, gtag=gtag, atag=atag, max_rounds=max_r, current_round=cur_r))
 
             elif d.startswith("gsch_b"):
                 # gsch_b1_groups / gsch_b2_pvs / ...
