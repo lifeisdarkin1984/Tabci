@@ -519,7 +519,19 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
         if is_stopped():
             await bot_client.send_message(ADMIN_ID, "🛑 عملیات توسط کاربر متوقف شد.")
             break
-        target = link.lstrip("@") if link.startswith("@") else link
+
+        # تبدیل لینک به فرمت قابل استفاده برای Pyrogram
+        link_clean = link.strip()
+        if link_clean.startswith("@"):
+            target = link_clean.lstrip("@")
+        elif "t.me/+" in link_clean or "t.me/joinchat/" in link_clean:
+            # لینک دعوت خصوصی — کامل بده
+            target = link_clean
+        elif "t.me/" in link_clean:
+            # لینک عمومی — فقط username بگیر
+            target = link_clean.split("t.me/")[-1].strip("/").split("?")[0]
+        else:
+            target = link_clean
         try:
             result = await uc.join_chat(target)
             ok_links.append(link)
