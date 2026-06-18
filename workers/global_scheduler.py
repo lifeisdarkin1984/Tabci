@@ -18,16 +18,19 @@ async def _send_banner(uc, chat_id, bt, bf, bft):
 
 
 async def _run_for_target(target):
-    """target = 'groups' یا 'pvs'"""
+    """target = 'groups' ÛŒØ§ 'pvs'"""
     now = int(time.time())
     row = q(
-        "SELECT interval_minutes, last_run, last_index FROM global_scheduler "
+        "SELECT interval_minutes, last_run, last_index, group_tag_filter, acc_tag_filter "
+        "FROM global_scheduler "
         "WHERE admin_id=%s AND target=%s AND is_active=1",
         (ADMIN_ID, target)
     )
     if not row:
         return
-    interval_min, last_run, last_index = row[0]
+    interval_min, last_run, last_index, gtag, atag = row[0]
+    gtag = gtag or "ALL"
+    atag = atag or "ALL"
     if now - last_run < interval_min * 60:
         return
 
@@ -39,7 +42,6 @@ async def _run_for_target(target):
     if not banners:
         return
 
-    # انتخاب پیام بعدی به ترتیب چرخشی (هر دوره یکی)
     idx = last_index % len(banners)
     _, bt, bf, bft = banners[idx]
 
@@ -49,12 +51,22 @@ async def _run_for_target(target):
         (enums.ChatType.PRIVATE,)
     )
 
-    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+    # ÙÛŒÙ„ØªØ± Ø§Ú©Ø§Ù†Øªâ€ŒÙ‡Ø§ Ø¨Ø± Ø§Ø³Ø§Ø³ Ø¨Ø±Ú†Ø³Ø¨
+    if atag not in ("ALL", ""):
+        if atag == "NOTAG":
+            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
+                     "AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+        else:
+            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND tag=%s",
+                     (ADMIN_ID, atag))
+    else:
+        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+
     for (acc_id,) in accs:
         if is_stopped():
             break
         if is_in_cooldown(acc_id):
-            print(f"[GlobalScheduler:{target}] اکانت {acc_id} در cooldown، رد شد")
+            print(f"[GlobalScheduler:{target}] Ø§Ú©Ø§Ù†Øª {acc_id} Ø¯Ø± cooldownØŒ Ø±Ø¯ Ø´Ø¯")
             continue
         uc = await get_user_client(acc_id)
         if not uc:
@@ -62,10 +74,23 @@ async def _run_for_target(target):
         try:
             await uc.start()
 
-            # مرتب‌سازی — فعال‌ترین اول
+            # ÙÛŒÙ„ØªØ± Ú¯Ø±ÙˆÙ‡â€ŒÙ‡Ø§ Ø¨Ø± Ø§Ø³Ø§Ø³ Ø¨Ø±Ú†Ø³Ø¨ (ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ groups)
+            allowed_chats = None
+            if target == "groups" and gtag not in ("ALL", ""):
+                if gtag == "NOTAG":
+                    rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s "
+                             "AND (tag_name='' OR tag_name IS NULL)", (ADMIN_ID, acc_id))
+                else:
+                    rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
+                             (ADMIN_ID, acc_id, gtag))
+                allowed_chats = set(r[0] for r in rows)
+
+            # Ù…Ø±ØªØ¨â€ŒØ³Ø§Ø²ÛŒ â€” ÙØ¹Ø§Ù„â€ŒØªØ±ÛŒÙ† Ø§ÙˆÙ„
             dialogs = []
             async for dlg in uc.get_dialogs():
                 if dlg.chat.type not in chat_type_filter:
+                    continue
+                if allowed_chats is not None and dlg.chat.id not in allowed_chats:
                     continue
                 last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
                 dialogs.append((last_ts, dlg))
@@ -92,7 +117,7 @@ async def _run_for_target(target):
             try: await uc.stop()
             except Exception: pass
         except Exception as e:
-            print(f"[GlobalScheduler:{target}] خطا در {acc_id}: {e}")
+            print(f"[GlobalScheduler:{target}] Ø®Ø·Ø§ Ø¯Ø± {acc_id}: {e}")
             try: await uc.stop()
             except Exception: pass
 
@@ -104,11 +129,11 @@ async def _run_for_target(target):
 
 
 async def run():
-    print("📨 Global scheduler worker started")
+    print("ðŸ“¨ Global scheduler worker started")
     while True:
         try:
             await _run_for_target("groups")
             await _run_for_target("pvs")
         except Exception as e:
-            print(f"[GlobalScheduler] خطای کلی: {e}")
+            print(f"[GlobalScheduler] Ø®Ø·Ø§ÛŒ Ú©Ù„ÛŒ: {e}")
         await asyncio.sleep(60)
