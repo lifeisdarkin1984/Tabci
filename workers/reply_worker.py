@@ -6,13 +6,24 @@ from utils import get_user_client, ADMIN_ID, record_flood, is_in_cooldown, reset
 
 STOP_FLAG = False
 
-async def run_once(acc_id, message_text):
+async def run_once(acc_id, message_text, group_tag_filter="ALL"):
     if is_in_cooldown(acc_id):
         print(f"[ReplyWorker] اکانت {acc_id} در cooldown است، رد شد")
         return
     uc = await get_user_client(acc_id)
     if not uc:
         return
+
+    # گرفتن chat_id های مجاز بر اساس فیلتر
+    allowed_chats = None
+    if group_tag_filter not in ("ALL", ""):
+        if group_tag_filter == "NOTAG":
+            rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s "
+                     "AND (tag_name='' OR tag_name IS NULL)", (ADMIN_ID, acc_id))
+        else:
+            rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
+                     (ADMIN_ID, acc_id, group_tag_filter))
+        allowed_chats = set(r[0] for r in rows)
     try:
         await uc.start()
 
@@ -20,6 +31,9 @@ async def run_once(acc_id, message_text):
         dialogs = []
         async for dlg in uc.get_dialogs():
             if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
+                continue
+            # اعمال فیلتر برچسب
+            if allowed_chats is not None and dlg.chat.id not in allowed_chats:
                 continue
             last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
             dialogs.append((last_ts, dlg))
@@ -98,13 +112,14 @@ async def run():
 
             # ── تنظیمات تک‌اکانت ──
             jobs = q(
-                "SELECT r.account_id, r.interval_minutes, r.last_run "
+                "SELECT r.account_id, r.interval_minutes, r.last_run, "
+                "r.group_tag_filter, r.acc_tag_filter "
                 "FROM reply_rand r "
                 "JOIN accounts a ON r.account_id=a.id "
                 "WHERE r.is_active=1 AND a.admin_id=%s AND a.status='active'",
                 (ADMIN_ID,)
             )
-            for (acc_id, interval_min, last_run) in jobs:
+            for (acc_id, interval_min, last_run, gtag, atag) in jobs:
                 if STOP_FLAG:
                     break
                 if now - last_run < interval_min * 60:
@@ -112,28 +127,36 @@ async def run():
                 msg_text = await _get_next_banner(acc_id)
                 if not msg_text:
                     continue
-                await run_once(acc_id, msg_text)
+                await run_once(acc_id, msg_text, group_tag_filter=gtag or "ALL")
                 u("UPDATE reply_rand SET last_run=%s WHERE account_id=%s", (now, acc_id))
 
             # ── تنظیمات همگانی (account_id='global') ──
             grow = q(
-                "SELECT interval_minutes, last_run FROM reply_rand "
+                "SELECT interval_minutes, last_run, group_tag_filter, acc_tag_filter "
+                "FROM reply_rand "
                 "WHERE account_id='global' AND admin_id=%s AND is_active=1",
                 (ADMIN_ID,)
             )
             if grow:
-                interval_min, last_run = grow[0]
+                interval_min, last_run, gtag, atag = grow[0]
                 if now - last_run >= interval_min * 60:
                     msg_text = await _get_next_banner("global")
                     if msg_text:
-                        accs = q(
-                            "SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
-                            (ADMIN_ID,)
-                        )
+                        # فیلتر اکانت‌ها
+                        if atag and atag not in ("ALL", ""):
+                            if atag == "NOTAG":
+                                accs = q("SELECT id FROM accounts WHERE admin_id=%s "
+                                         "AND status='active' AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+                            else:
+                                accs = q("SELECT id FROM accounts WHERE admin_id=%s "
+                                         "AND status='active' AND tag=%s", (ADMIN_ID, atag))
+                        else:
+                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
+                                     (ADMIN_ID,))
                         for (acc_id,) in accs:
                             if STOP_FLAG:
                                 break
-                            await run_once(acc_id, msg_text)
+                            await run_once(acc_id, msg_text, group_tag_filter=gtag or "ALL")
                         u("UPDATE reply_rand SET last_run=%s WHERE account_id='global' AND admin_id=%s",
                           (now, ADMIN_ID))
 
