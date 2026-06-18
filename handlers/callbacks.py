@@ -382,6 +382,40 @@ def register(app):
                 t.set_name("join_task")
                 clear_step(ADMIN_ID)
 
+            # ── انتخاب برچسب برای جوین تک‌اکانت ──
+            elif d.startswith("jointag_"):
+                # d = jointag_{acc_id}_tag_{tagname}
+                rest = d[8:]  # {acc_id}_tag_{tagname}
+                acc_id, _, tag_name = rest.partition("_tag_")
+                links = [l for l in get_step_data(ADMIN_ID).splitlines() if l.strip()]
+                chosen_tag = "" if tag_name == "NOTAG" else tag_name
+                row = q("SELECT min_delay,max_delay FROM join_settings WHERE account_id=%s", (acc_id,))
+                mn, mx = (row[0][0], row[0][1]) if row else (180, 420)
+                tag_lbl = f"«{chosen_tag}»" if chosen_tag else "بدون برچسب"
+                set_stop(False)
+                await cb.message.edit_text(
+                    f"🚀 عملیات عضویت {len(links)} لینک شروع شد...\n🏷 برچسب: {tag_lbl}"
+                )
+                from handlers.text_handler import _join_links
+                t = asyncio.create_task(_join_links(client, acc_id, links, mn, mx,
+                                                     tag=chosen_tag))
+                t.set_name("join_task")
+                clear_step(ADMIN_ID)
+
+            # ── انتخاب برچسب برای جوین همگانی ──
+            elif d.startswith("gjointag_tag_"):
+                tag_name = d[13:]
+                chosen_tag = "" if tag_name == "NOTAG" else tag_name
+                links = [l for l in get_step_data(ADMIN_ID).splitlines() if l.strip()]
+                tag_lbl = f"«{chosen_tag}»" if chosen_tag else "بدون برچسب"
+                # ذخیره برچسب در step_data با جداکننده
+                set_step(ADMIN_ID, "g_join_links",
+                         f"TAG:{chosen_tag}\n" + "\n".join(links))
+                await cb.message.edit_text(
+                    f"✅ {len(links)} لینک — 🏷 {tag_lbl}\nنوع عضویت را انتخاب کنید:",
+                    reply_markup=global_join_kb()
+                )
+
             elif d.startswith("m_join_"):
                 acc_id = d[7:]
                 row = q("SELECT min_delay,max_delay FROM join_settings WHERE account_id=%s", (acc_id,))
@@ -430,10 +464,27 @@ def register(app):
 
             elif d.startswith("sgrp_go_"):
                 acc_id = d[8:]
-                text = get_step_data(ADMIN_ID)
+                msg_text = get_step_data(ADMIN_ID)
+                # ذخیره متن + acc_id برای مرحله بعد
+                set_step(ADMIN_ID, f"sgrp_gtag_{acc_id}", msg_text)
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text(
+                    "📢 ارسال به کدوم گروه‌ها؟",
+                    reply_markup=tag_select_kb(tag_list, f"sgrpgtag_{acc_id}")
+                )
+
+            # ── انتخاب برچسب گروه برای ارسال تک‌اکانت ──
+            elif d.startswith("sgrpgtag_"):
+                rest = d[9:]  # {acc_id}_tag_{tagname}
+                acc_id, _, tag_name = rest.partition("_tag_")
+                msg_text = get_step_data(ADMIN_ID)
+                group_tag = "" if tag_name == "ALL" else ("" if tag_name == "NOTAG" else tag_name)
+                group_tag_filter = tag_name  # ALL / NOTAG / tagname
                 set_stop(False)
                 await cb.message.edit_text("⏳ در حال ارسال به گروه‌ها...")
-                t = asyncio.create_task(_send_to_groups_task(client, acc_id, text))
+                t = asyncio.create_task(_send_to_groups_task(client, acc_id, msg_text,
+                                                              group_tag_filter=group_tag_filter))
                 t.set_name("send_grp_task")
                 clear_step(ADMIN_ID)
 
@@ -527,7 +578,95 @@ def register(app):
                 back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
                 await cb.message.edit_reply_markup(reply_banner_list_kb(acc_id, [], back_to=back))
 
-            elif d.startswith("rr_time_"):
+            elif d.startswith("rr_gtag_"):
+                acc_id = d[8:]
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text(
+                    "🏷 فیلتر گروه‌ها برای ریپلای:",
+                    reply_markup=tag_select_kb(tag_list, f"rr_gtag_set_{acc_id}")
+                )
+
+            elif d.startswith("rr_gtag_set_"):
+                rest = d[12:]  # {acc_id}_tag_{tagname}
+                acc_id, _, tag_name = rest.partition("_tag_")
+                u("INSERT INTO reply_rand (account_id,admin_id,group_tag_filter) VALUES(%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE group_tag_filter=%s", (acc_id, ADMIN_ID, tag_name, tag_name))
+                await cb.answer(f"✅ فیلتر گروه: {tag_name}")
+                row = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM reply_rand WHERE account_id=%s", (acc_id,))
+                active = row[0][0] if row else 0
+                gtag = row[0][1] if row else "ALL"
+                atag = row[0][2] if row else "ALL"
+                back = "menu_global" if acc_id == "global" else None
+                await cb.message.edit_reply_markup(reply_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
+
+            elif d.startswith("rr_atag_"):
+                acc_id = d[8:]
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text(
+                    "👤 فیلتر اکانت‌ها برای ریپلای:",
+                    reply_markup=tag_select_kb(tag_list, f"rr_atag_set_{acc_id}")
+                )
+
+            elif d.startswith("rr_atag_set_"):
+                rest = d[12:]
+                acc_id, _, tag_name = rest.partition("_tag_")
+                u("INSERT INTO reply_rand (account_id,admin_id,acc_tag_filter) VALUES(%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE acc_tag_filter=%s", (acc_id, ADMIN_ID, tag_name, tag_name))
+                await cb.answer(f"✅ فیلتر اکانت: {tag_name}")
+                row = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM reply_rand WHERE account_id=%s", (acc_id,))
+                active = row[0][0] if row else 0
+                gtag = row[0][1] if row else "ALL"
+                atag = row[0][2] if row else "ALL"
+                back = "menu_global" if acc_id == "global" else None
+                await cb.message.edit_reply_markup(reply_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
+
+            elif d.startswith("rc_gtag_"):
+                acc_id = d[8:]
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text(
+                    "🏷 فیلتر گروه‌ها برای ری‌اکت:",
+                    reply_markup=tag_select_kb(tag_list, f"rc_gtag_set_{acc_id}")
+                )
+
+            elif d.startswith("rc_gtag_set_"):
+                rest = d[12:]
+                acc_id, _, tag_name = rest.partition("_tag_")
+                u("INSERT INTO react_rand (account_id,admin_id,group_tag_filter) VALUES(%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE group_tag_filter=%s", (acc_id, ADMIN_ID, tag_name, tag_name))
+                await cb.answer(f"✅ فیلتر گروه: {tag_name}")
+                row = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM react_rand WHERE account_id=%s", (acc_id,))
+                active = row[0][0] if row else 0
+                gtag = row[0][1] if row else "ALL"
+                atag = row[0][2] if row else "ALL"
+                back = "menu_global" if acc_id == "global" else None
+                await cb.message.edit_reply_markup(react_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
+
+            elif d.startswith("rc_atag_"):
+                acc_id = d[8:]
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text(
+                    "👤 فیلتر اکانت‌ها برای ری‌اکت:",
+                    reply_markup=tag_select_kb(tag_list, f"rc_atag_set_{acc_id}")
+                )
+
+            elif d.startswith("rc_atag_set_"):
+                rest = d[12:]
+                acc_id, _, tag_name = rest.partition("_tag_")
+                u("INSERT INTO react_rand (account_id,admin_id,acc_tag_filter) VALUES(%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE acc_tag_filter=%s", (acc_id, ADMIN_ID, tag_name, tag_name))
+                await cb.answer(f"✅ فیلتر اکانت: {tag_name}")
+                row = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM react_rand WHERE account_id=%s", (acc_id,))
+                active = row[0][0] if row else 0
+                gtag = row[0][1] if row else "ALL"
+                atag = row[0][2] if row else "ALL"
+                back = "menu_global" if acc_id == "global" else None
+                await cb.message.edit_reply_markup(react_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
+
+
                 acc_id = d[8:]
                 set_step(ADMIN_ID, f"rr_int_{acc_id}")
                 await cb.message.edit_text("⏱ فاصله ریپلای (دقیقه):")
@@ -541,9 +680,12 @@ def register(app):
                 if new:
                     set_stop(False); rw.STOP_FLAG = False
                 await cb.answer(f"ریپلای {'فعال' if new else 'غیرفعال'} شد")
-                row2 = q("SELECT is_active FROM reply_rand WHERE account_id=%s", (acc_id,))
+                row2 = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM reply_rand WHERE account_id=%s", (acc_id,))
+                active = row2[0][0] if row2 else 0
+                gtag = row2[0][1] if row2 else "ALL"
+                atag = row2[0][2] if row2 else "ALL"
                 back = "menu_global" if acc_id == "global" else None
-                await cb.message.edit_reply_markup(reply_rand_kb(acc_id, row2[0][0], back_to=back))
+                await cb.message.edit_reply_markup(reply_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
             elif d.startswith("rr_run_"):
                 acc_id = d[7:]
@@ -551,26 +693,35 @@ def register(app):
                 if not bnrs:
                     await cb.answer("❌ اول متن تنظیم کنید", show_alert=True); return
                 set_stop(False); rw.STOP_FLAG = False
+                row_cfg = q("SELECT last_index, group_tag_filter, acc_tag_filter "
+                            "FROM reply_rand WHERE account_id=%s", (acc_id,))
+                gtag = (row_cfg[0][1] if row_cfg else None) or "ALL"
+                atag = (row_cfg[0][2] if row_cfg else None) or "ALL"
                 if acc_id == "global":
-                    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
-                    row = q("SELECT last_index FROM reply_rand WHERE account_id='global'")
-                    idx = (row[0][0] if row else 0) % len(bnrs)
+                    # فیلتر اکانت‌ها
+                    if atag not in ("ALL", ""):
+                        if atag == "NOTAG":
+                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
+                                     "AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+                        else:
+                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND tag=%s",
+                                     (ADMIN_ID, atag))
+                    else:
+                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                    idx = (row_cfg[0][0] if row_cfg else 0) % len(bnrs)
                     msg_text = bnrs[idx][0]
                     for (aid,) in accs:
-                        asyncio.create_task(rw.run_once(aid, msg_text))
+                        asyncio.create_task(rw.run_once(aid, msg_text, group_tag_filter=gtag))
                     u("INSERT INTO reply_rand (account_id,admin_id,last_index) VALUES('global',%s,%s) "
                       "ON DUPLICATE KEY UPDATE last_index=%s", (ADMIN_ID, idx+1, idx+1))
                     await cb.answer(f"🚀 برای {len(accs)} اکانت شروع شد", show_alert=True)
                 else:
-                    row = q("SELECT last_index FROM reply_rand WHERE account_id=%s", (acc_id,))
-                    idx = (row[0][0] if row else 0) % len(bnrs)
+                    idx = (row_cfg[0][0] if row_cfg else 0) % len(bnrs)
                     msg_text = bnrs[idx][0]
                     u("INSERT INTO reply_rand (account_id,admin_id,last_index) VALUES(%s,%s,%s) "
                       "ON DUPLICATE KEY UPDATE last_index=%s", (acc_id, ADMIN_ID, idx+1, idx+1))
                     await cb.answer("🚀 شروع شد")
-                    asyncio.create_task(rw.run_once(acc_id, msg_text))
-
-
+                    asyncio.create_task(rw.run_once(acc_id, msg_text, group_tag_filter=gtag))
 
             # ══ ری‌اکت رندم ══
             elif d.startswith("m_react_"):
@@ -596,21 +747,35 @@ def register(app):
                 if new:
                     set_stop(False); rcw.STOP_FLAG = False
                 await cb.answer(f"ری‌اکت {'فعال' if new else 'غیرفعال'} شد")
-                row2 = q("SELECT is_active FROM react_rand WHERE account_id=%s", (acc_id,))
+                row2 = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM react_rand WHERE account_id=%s", (acc_id,))
+                active = row2[0][0] if row2 else 0
+                gtag = row2[0][1] if row2 else "ALL"
+                atag = row2[0][2] if row2 else "ALL"
                 back = "menu_global" if acc_id == "global" else None
-                await cb.message.edit_reply_markup(react_rand_kb(acc_id, row2[0][0], back_to=back))
+                await cb.message.edit_reply_markup(react_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
             elif d.startswith("rc_run_"):
                 acc_id = d[7:]
                 set_stop(False); rcw.STOP_FLAG = False
+                row_cfg = q("SELECT group_tag_filter, acc_tag_filter FROM react_rand WHERE account_id=%s", (acc_id,))
+                gtag = (row_cfg[0][0] if row_cfg else None) or "ALL"
+                atag = (row_cfg[0][1] if row_cfg else None) or "ALL"
                 if acc_id == "global":
-                    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                    if atag not in ("ALL", ""):
+                        if atag == "NOTAG":
+                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
+                                     "AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+                        else:
+                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND tag=%s",
+                                     (ADMIN_ID, atag))
+                    else:
+                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
                     for (aid,) in accs:
-                        asyncio.create_task(rcw.run_once(aid))
+                        asyncio.create_task(rcw.run_once(aid, group_tag_filter=gtag))
                     await cb.answer(f"🚀 برای {len(accs)} اکانت شروع شد", show_alert=True)
                 else:
                     await cb.answer("🚀 شروع شد")
-                    asyncio.create_task(rcw.run_once(acc_id))
+                    asyncio.create_task(rcw.run_once(acc_id, group_tag_filter=gtag))
 
             # ══ global ══
             elif d == "g_stats":
@@ -666,43 +831,97 @@ def register(app):
                 set_step(ADMIN_ID, "g_sgrp"); await cb.message.edit_text("📢 متن پیام برای گروه‌های همه:", reply_markup=back_kb("menu_global"))
 
             elif d == "g_sgrp_go":
-                text = get_step_data(ADMIN_ID)
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                msg_text = get_step_data(ADMIN_ID)
+                set_step(ADMIN_ID, "g_sgrp_atag", msg_text)
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text(
+                    "👤 ارسال با کدوم اکانت‌ها؟",
+                    reply_markup=tag_select_kb(tag_list, "gsgrpatag")
+                )
+
+            # ── انتخاب برچسب اکانت برای ارسال همگانی ──
+            elif d.startswith("gsgrpatag_tag_"):
+                acc_tag = d[14:]
+                msg_text = get_step_data(ADMIN_ID)
+                # ذخیره acc_tag در step_data برای مرحله بعد
+                set_step(ADMIN_ID, f"g_sgrp_gtag_{acc_tag}", msg_text)
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text(
+                    "👥 ارسال به کدوم گروه‌ها؟",
+                    reply_markup=tag_select_kb(tag_list, f"gsgrpgtag_{acc_tag}")
+                )
+
+            # ── انتخاب برچسب گروه برای ارسال همگانی ──
+            elif d.startswith("gsgrpgtag_"):
+                rest = d[10:]  # {acc_tag}_tag_{group_tag}
+                acc_tag, _, group_tag_filter = rest.partition("_tag_")
+                msg_text = get_step_data(ADMIN_ID)
+                from handlers.text_handler import get_filtered_accounts
+                accs = get_filtered_accounts(acc_tag)
                 set_stop(False)
+                await cb.message.edit_text(f"⏳ ارسال به {len(accs)} اکانت شروع شد...")
                 for (aid,) in accs:
-                    t = asyncio.create_task(_send_to_groups_task(client, aid, text)); t.set_name("send_grp_task")
-                await cb.message.edit_text("✅ شروع شد.", reply_markup=global_kb()); clear_step(ADMIN_ID)
+                    t = asyncio.create_task(_send_to_groups_task(client, aid, msg_text,
+                                                                   group_tag_filter=group_tag_filter))
+                    t.set_name("send_grp_task")
+                clear_step(ADMIN_ID)
 
             elif d == "g_join":
                 set_step(ADMIN_ID, "g_join"); await cb.message.edit_text("➕ لینک‌ها را هر کدام در یک خط:", reply_markup=back_kb("menu_global"))
 
             elif d == "g_join_split":
-                links = [l for l in get_step_data(ADMIN_ID).splitlines() if l.strip()]
+                raw = get_step_data(ADMIN_ID)
+                lines = raw.splitlines()
+                chosen_tag = ""
+                if lines and lines[0].startswith("TAG:"):
+                    chosen_tag = lines[0][4:]
+                    links = [l for l in lines[1:] if l.strip()]
+                else:
+                    links = [l for l in lines if l.strip()]
                 accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
                 if not accs:
                     await cb.answer("اکانتی وجود ندارد", show_alert=True); return
                 per = max(1, len(links) // len(accs))
                 set_stop(False)
-                await cb.message.edit_text(f"🔀 {len(links)} لینک بین {len(accs)} اکانت تقسیم شد.")
+                tag_lbl = f"«{chosen_tag}»" if chosen_tag else "بدون برچسب"
+                await cb.message.edit_text(
+                    f"🔀 {len(links)} لینک بین {len(accs)} اکانت تقسیم شد.\n🏷 برچسب: {tag_lbl}"
+                )
                 for i, (aid,) in enumerate(accs):
                     chunk = links[i*per:(i+1)*per]
                     if chunk:
                         row = q("SELECT min_delay,max_delay FROM join_settings WHERE account_id=%s", (aid,))
                         mn, mx = (row[0][0], row[0][1]) if row else (180, 420)
                         from handlers.text_handler import _join_links
-                        t = asyncio.create_task(_join_links(client, aid, chunk, mn, mx)); t.set_name("join_task")
+                        t = asyncio.create_task(_join_links(client, aid, chunk, mn, mx,
+                                                             tag=chosen_tag))
+                        t.set_name("join_task")
                 clear_step(ADMIN_ID)
 
             elif d == "g_join_all":
-                links = [l for l in get_step_data(ADMIN_ID).splitlines() if l.strip()]
+                raw = get_step_data(ADMIN_ID)
+                lines = raw.splitlines()
+                chosen_tag = ""
+                if lines and lines[0].startswith("TAG:"):
+                    chosen_tag = lines[0][4:]
+                    links = [l for l in lines[1:] if l.strip()]
+                else:
+                    links = [l for l in lines if l.strip()]
                 accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
                 set_stop(False)
-                await cb.message.edit_text(f"📋 همه اکانت‌ها {len(links)} لینک.")
+                tag_lbl = f"«{chosen_tag}»" if chosen_tag else "بدون برچسب"
+                await cb.message.edit_text(
+                    f"📋 همه اکانت‌ها {len(links)} لینک — 🏷 {tag_lbl}"
+                )
                 for (aid,) in accs:
                     row = q("SELECT min_delay,max_delay FROM join_settings WHERE account_id=%s", (aid,))
                     mn, mx = (row[0][0], row[0][1]) if row else (180, 420)
                     from handlers.text_handler import _join_links
-                    t = asyncio.create_task(_join_links(client, aid, links, mn, mx)); t.set_name("join_task")
+                    t = asyncio.create_task(_join_links(client, aid, links, mn, mx,
+                                                         tag=chosen_tag))
+                    t.set_name("join_task")
                 clear_step(ADMIN_ID)
 
             elif d == "g_fj":
@@ -719,16 +938,19 @@ def register(app):
                 )
 
             elif d.startswith("gsch_panel_"):
-                target = d[11:]  # groups یا pvs
-                row = q("SELECT is_active, interval_minutes FROM global_scheduler "
-                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                target = d[11:]
+                row = q("SELECT is_active, interval_minutes, group_tag_filter, acc_tag_filter "
+                        "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 60
+                gtag = (row[0][2] if row else None) or "ALL"
+                atag = (row[0][3] if row else None) or "ALL"
                 title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
                 bnrs = q("SELECT slot, text, file_id FROM global_banners "
                          "WHERE admin_id=%s AND target=%s ORDER BY slot", (ADMIN_ID, target))
                 txt = f"⏰ **ارسال زمان‌دار به {title}**\n\n"
-                txt += f"فاصله: هر {interval} دقیقه\nوضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n\n"
+                txt += f"فاصله: هر {interval} دقیقه\nوضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n"
+                txt += f"🏷 گروه: {gtag} | 👤 اکانت: {atag}\n\n"
                 for slot in (1, 2, 3, 4):
                     b = next((x for x in bnrs if x[0] == slot), None)
                     if b:
@@ -736,8 +958,48 @@ def register(app):
                         txt += f"💬 پیام {slot}: [{short}{'...' if b[1] and len(b[1])>30 else ''}] {'📁' if b[2] else ''}\n"
                     else:
                         txt += f"💬 پیام {slot}: تنظیم نشده\n"
-                txt += "\nهر دوره (هر X دقیقه) یکی از این پیام‌ها به‌ترتیب شماره ارسال می‌شود."
-                await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(target, active))
+                txt += "\nهر دوره یکی از این پیام‌ها به‌ترتیب شماره ارسال می‌شود."
+                await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(target, active, gtag=gtag, atag=atag))
+
+            elif d.startswith("gsch_gtag_set_"):
+                rest = d[14:]
+                target, _, tag_name = rest.partition("_tag_")
+                u("INSERT INTO global_scheduler (admin_id,target,group_tag_filter) VALUES(%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE group_tag_filter=%s", (ADMIN_ID, target, tag_name, tag_name))
+                await cb.answer(f"✅ فیلتر گروه: {tag_name}")
+                row = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM global_scheduler "
+                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                active = row[0][0] if row else 0
+                gtag = row[0][1] if row else "ALL"
+                atag = row[0][2] if row else "ALL"
+                await cb.message.edit_reply_markup(global_sch_panel_kb(target, active, gtag=gtag, atag=atag))
+
+            elif d.startswith("gsch_gtag_"):
+                target = d[10:]
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text("🏷 فیلتر گروه‌ها برای زمان‌بند:",
+                    reply_markup=tag_select_kb(tag_list, f"gsch_gtag_set_{target}"))
+
+            elif d.startswith("gsch_atag_set_"):
+                rest = d[14:]
+                target, _, tag_name = rest.partition("_tag_")
+                u("INSERT INTO global_scheduler (admin_id,target,acc_tag_filter) VALUES(%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE acc_tag_filter=%s", (ADMIN_ID, target, tag_name, tag_name))
+                await cb.answer(f"✅ فیلتر اکانت: {tag_name}")
+                row = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM global_scheduler "
+                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                active = row[0][0] if row else 0
+                gtag = row[0][1] if row else "ALL"
+                atag = row[0][2] if row else "ALL"
+                await cb.message.edit_reply_markup(global_sch_panel_kb(target, active, gtag=gtag, atag=atag))
+
+            elif d.startswith("gsch_atag_"):
+                target = d[10:]
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text("👤 فیلتر اکانت‌ها برای زمان‌بند:",
+                    reply_markup=tag_select_kb(tag_list, f"gsch_atag_set_{target}"))
 
             elif d.startswith("gsch_time_"):
                 target = d[10:]
@@ -827,6 +1089,79 @@ def register(app):
                     ])
                 )
 
+            # ══ مدیریت برچسب‌ها ══
+            elif d == "tags_menu":
+                await cb.message.edit_text(
+                    "🏷 **مدیریت برچسب‌ها**\n\nبرچسب‌ها برای دسته‌بندی گروه‌ها و اکانت‌ها استفاده می‌شوند.",
+                    reply_markup=tags_menu_kb()
+                )
+
+            elif d == "tags_groups":
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                txt = "👥 **برچسب گروه‌ها**\n\n"
+                if tag_list:
+                    txt += "برچسب‌های موجود:\n" + "\n".join(f"• {t}" for t in tag_list)
+                else:
+                    txt += "هیچ برچسبی ساخته نشده."
+                await cb.message.edit_text(txt, reply_markup=tags_list_kb(tag_list, "groups"))
+
+            elif d == "tags_accounts":
+                accs = q("SELECT id,name,phone,tag FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                txt = "👤 **برچسب اکانت‌ها**\n\n"
+                for a in accs:
+                    tag_str = f"🏷 {a[3]}" if a[3] else "بدون برچسب"
+                    txt += f"👤 {a[1]} | {a[2]} — {tag_str}\n"
+                await cb.message.edit_text(txt, reply_markup=account_tag_kb(accs))
+
+            elif d.startswith("tag_new_"):
+                context = d[8:]
+                set_step(ADMIN_ID, f"tag_new_{context}")
+                await cb.message.edit_text(
+                    "📝 نام برچسب جدید را وارد کنید:\nمثال: `تبلیغاتی`",
+                    reply_markup=back_kb("tags_menu")
+                )
+
+            elif d.startswith("tag_del_"):
+                _, _, context, tag_name = d.split("_", 3)
+                u("DELETE FROM tags WHERE admin_id=%s AND name=%s", (ADMIN_ID, tag_name))
+                # حذف از گروه‌ها هم
+                u("UPDATE group_tags SET tag_name='' WHERE admin_id=%s AND tag_name=%s",
+                  (ADMIN_ID, tag_name))
+                await cb.answer(f"✅ برچسب «{tag_name}» حذف شد", show_alert=True)
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_reply_markup(tags_list_kb(tag_list, context))
+
+            elif d.startswith("acctag_sel_"):
+                acc_id = d[11:]
+                acc = q("SELECT name,phone,tag FROM accounts WHERE id=%s", (acc_id,))
+                if not acc:
+                    await cb.answer("اکانت یافت نشد", show_alert=True); return
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                txt = f"👤 **{acc[0][0]}** | {acc[0][1]}\n"
+                txt += f"برچسب فعلی: {acc[0][2] or 'بدون برچسب'}\n\nبرچسب جدید را انتخاب کنید:"
+                rows = [[InlineKeyboardButton(f"🏷 {t}", callback_data=f"acctag_set_{acc_id}_{t}")]
+                        for t in tag_list]
+                rows.append([InlineKeyboardButton("🔘 بدون برچسب", callback_data=f"acctag_set_{acc_id}_NOTAG")])
+                rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="tags_accounts")])
+                await cb.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(rows))
+
+            elif d.startswith("acctag_set_"):
+                _, _, acc_id, tag_name = d.split("_", 3)
+                new_tag = "" if tag_name == "NOTAG" else tag_name
+                u("UPDATE accounts SET tag=%s WHERE id=%s AND admin_id=%s",
+                  (new_tag, acc_id, ADMIN_ID))
+                lbl = f"«{new_tag}»" if new_tag else "بدون برچسب"
+                await cb.answer(f"✅ برچسب اکانت به {lbl} تغییر کرد", show_alert=True)
+                accs = q("SELECT id,name,phone,tag FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                txt = "👤 **برچسب اکانت‌ها**\n\n"
+                for a in accs:
+                    tag_str = f"🏷 {a[3]}" if a[3] else "بدون برچسب"
+                    txt += f"👤 {a[1]} | {a[2]} — {tag_str}\n"
+                await cb.message.edit_text(txt, reply_markup=account_tag_kb(accs))
+
             elif d == "g_sec":
                 row = q("SELECT COUNT(*) FROM secretary WHERE is_active=1 AND admin_id=%s", (ADMIN_ID,))
                 active = (row[0][0] if row else 0) > 0
@@ -906,11 +1241,13 @@ async def _send_to_pvs(bot_client, acc_id, text):
     await bot_client.send_message(ADMIN_ID, f"✅ پیوی‌ها\n👤 {display}\n✔️ {ok}\n❌ {fail}")
 
 
-async def _send_to_groups_task(bot_client, acc_id, text):
+async def _send_to_groups_task(bot_client, acc_id, text, group_tag_filter="ALL"):
     from handlers.text_handler import send_to_groups_smart
-    result = await send_to_groups_smart(bot_client, acc_id, text)
+    result = await send_to_groups_smart(bot_client, acc_id, text,
+                                         group_tag_filter=group_tag_filter)
+    tag_lbl = f" [🏷 {group_tag_filter}]" if group_tag_filter not in ("ALL", "") else ""
     report = (
-        f"✅ ارسال به گروه‌ها تمام شد\n"
+        f"✅ ارسال به گروه‌ها تمام شد{tag_lbl}\n"
         f"👤 {result.get('display', acc_id)}\n"
         f"✔️ موفق: {result['ok']}\n"
         f"❌ ناموفق: {result['fail']}\n"

@@ -195,14 +195,15 @@ def register(app):
             if not links:
                 await message.reply("❌ لینکی وارد نشد.")
                 return
-            row = q("SELECT min_delay,max_delay FROM join_settings WHERE account_id=%s", (acc_id,))
-            mn, mx = (row[0][0], row[0][1]) if row else (180, 420)
+            # ذخیره لینک‌ها و رفتن به مرحله انتخاب برچسب
+            set_step(ADMIN_ID, f"join_tag_{acc_id}", "\n".join(links))
+            tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+            tag_list = [t[0] for t in tags]
+            from keyboards import tag_select_kb
             await message.reply(
-                f"✅ **{len(links)} لینک دریافت شد**\n"
-                f"⏱ فاصله: {mn//60}–{mx//60} دقیقه\n🚀 شروع شد..."
+                f"✅ **{len(links)} لینک دریافت شد**\n\nبرچسب گروه‌ها را انتخاب کنید:",
+                reply_markup=tag_select_kb(tag_list, f"jointag_{acc_id}", show_all=False)
             )
-            asyncio.create_task(_join_links(client, acc_id, links, mn, mx))
-            clear_step(ADMIN_ID)
 
         elif step.startswith("joindelay_"):
             acc_id = step[10:]
@@ -249,6 +250,22 @@ def register(app):
         elif step == "g_lname":
             await _global_profile(message, "lname", text)
 
+        elif step.startswith("tag_new_"):
+            context = step[8:]
+            tag_name = text.strip()
+            if not tag_name or len(tag_name) > 50:
+                await message.reply("❌ نام برچسب باید بین ۱ تا ۵۰ کاراکتر باشد."); return
+            try:
+                u("INSERT INTO tags (admin_id,name) VALUES(%s,%s)", (ADMIN_ID, tag_name))
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                from keyboards import tags_list_kb
+                await message.reply(f"✅ برچسب «{tag_name}» ساخته شد.",
+                                     reply_markup=tags_list_kb(tag_list, context))
+            except Exception:
+                await message.reply(f"❌ برچسب «{tag_name}» از قبل وجود دارد.")
+            clear_step(ADMIN_ID)
+
         elif step == "g_sgrp":
             set_step(ADMIN_ID, "g_sgrp_confirm", text)
             await message.reply(
@@ -265,11 +282,13 @@ def register(app):
 
         elif step == "g_join":
             links = [l.strip() for l in text.splitlines() if l.strip()]
-            set_step(ADMIN_ID, "g_join_links", "\n".join(links))
-            from keyboards import global_join_kb
+            set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
+            tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+            tag_list = [t[0] for t in tags]
+            from keyboards import tag_select_kb
             await message.reply(
-                f"✅ {len(links)} لینک دریافت شد.\nنوع عضویت را انتخاب کنید:",
-                reply_markup=global_join_kb()
+                f"✅ {len(links)} لینک دریافت شد.\nبرچسب گروه‌ها را انتخاب کنید:",
+                reply_markup=tag_select_kb(tag_list, "gjointag", show_all=False)
             )
 
         elif step.startswith("rr_badd_"):
@@ -457,8 +476,8 @@ async def _extract_links(acc_id, channel, limit):
     return cleaned
 
 
-async def _join_links(bot_client, acc_id, links, min_d, max_d):
-    """عضویت در لینک‌ها با هندل کامل خطاها"""
+async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
+    """عضویت در لینک‌ها با هندل کامل خطاها + ذخیره برچسب"""
     uc = await get_user_client(acc_id)
     if not uc:
         return
@@ -466,7 +485,6 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d):
     me = await uc.get_me()
     acc_display = me.phone_number or str(me.id)
     ok_links, fail_links = [], []
-    # چک auto_leave
     row = q("SELECT auto_leave_limited FROM accounts WHERE id=%s", (acc_id,))
     auto_leave = row[0][0] if row else 0
 
@@ -476,8 +494,14 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d):
             break
         target = link.lstrip("@") if link.startswith("@") else link
         try:
-            await uc.join_chat(target)
+            result = await uc.join_chat(target)
             ok_links.append(link)
+            # ذخیره گروه با برچسب
+            if result and hasattr(result, 'id'):
+                chat_title = getattr(result, 'title', '') or ''
+                u("INSERT INTO group_tags (admin_id,account_id,chat_id,chat_title,tag_name) "
+                  "VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE tag_name=%s, chat_title=%s",
+                  (ADMIN_ID, acc_id, result.id, chat_title, tag, tag, chat_title))
             await bot_client.send_message(ADMIN_ID, f"✅ [{i}/{len(links)}] عضو شد: `{link}`")
 
         except FloodWait as e:
@@ -490,9 +514,14 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d):
             )
             await asyncio.sleep(safe_s)
             try:
-                await uc.join_chat(target)
+                result = await uc.join_chat(target)
                 ok_links.append(link)
-            except Exception as e2:
+                if result and hasattr(result, 'id'):
+                    chat_title = getattr(result, 'title', '') or ''
+                    u("INSERT INTO group_tags (admin_id,account_id,chat_id,chat_title,tag_name) "
+                      "VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE tag_name=%s, chat_title=%s",
+                      (ADMIN_ID, acc_id, result.id, chat_title, tag, tag, chat_title))
+            except Exception:
                 fail_links.append(link)
 
         except UserAlreadyParticipant:
@@ -518,15 +547,39 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d):
             await asyncio.sleep(delay)
 
     await uc.stop()
-    total = len(ok_links) + len(fail_links)
-    report = (f"✅ عملیات عضویت تمام شد\n👤 {acc_display}\n"
+    tag_lbl = f" — 🏷 {tag}" if tag else ""
+    report = (f"✅ عملیات عضویت تمام شد{tag_lbl}\n👤 {acc_display}\n"
               f"موفق: {len(ok_links)}\nناموفق: {len(fail_links)}")
     if fail_links:
         report += "\n\n❗️ ناموفق‌ها:\n" + "\n".join(fail_links)
     await bot_client.send_message(ADMIN_ID, report)
 
 
-async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
+def get_filtered_accounts(tag_filter):
+    """اکانت‌های فیلترشده بر اساس برچسب"""
+    if tag_filter == "ALL":
+        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+    elif tag_filter == "NOTAG":
+        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
+                 "AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+    else:
+        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND tag=%s",
+                 (ADMIN_ID, tag_filter))
+
+def get_filtered_chat_ids(acc_id, tag_filter):
+    """chat_id های فیلترشده برای یک اکانت"""
+    if tag_filter == "ALL":
+        return None  # None یعنی همه گروه‌ها (بدون فیلتر)
+    elif tag_filter == "NOTAG":
+        rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s "
+                 "AND (tag_name='' OR tag_name IS NULL)", (ADMIN_ID, acc_id))
+    else:
+        rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
+                 (ADMIN_ID, acc_id, tag_filter))
+    return set(r[0] for r in rows) if rows else set()
+
+
+async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group_tag_filter="ALL"):
     """ارسال پیام هوشمند با تشخیص محدودیت و عضویت اجبار"""
     from pyrogram import enums as en
     from utils import record_flood, is_in_cooldown, reset_flood
@@ -544,6 +597,9 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
     row_fj = q("SELECT force_join_active FROM join_settings WHERE account_id=%s", (acc_id,))
     do_force_join = row_fj[0][0] if row_fj else 0
 
+    # فیلتر گروه‌ها بر اساس برچسب
+    allowed_chats = get_filtered_chat_ids(acc_id, group_tag_filter)
+
     ok = fail = limited = force_joined = left = 0
     await uc.start()
 
@@ -551,6 +607,9 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False):
     dialogs = []
     async for dlg in uc.get_dialogs():
         if dlg.chat.type not in (en.ChatType.GROUP, en.ChatType.SUPERGROUP):
+            continue
+        # اعمال فیلتر برچسب
+        if allowed_chats is not None and dlg.chat.id not in allowed_chats:
             continue
         last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
         dialogs.append((last_ts, dlg))
