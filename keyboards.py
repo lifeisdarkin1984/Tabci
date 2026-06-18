@@ -70,6 +70,7 @@ def global_kb():
          InlineKeyboardButton("📝 تغییر بیو",    callback_data="g_bio")],
         [InlineKeyboardButton("📊 آمار اکانت‌ها",   callback_data="g_stats"),
          InlineKeyboardButton("♻️ وضعیت اکانت‌ها", callback_data="g_status")],
+        [InlineKeyboardButton("🏷 مدیریت برچسب‌ها", callback_data="tags_menu")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ])
 
@@ -117,13 +118,17 @@ def scheduler_kb(acc_id, active):
     ])
 
 # ─── ریپلای رندم ────────────────────────────────────────────
-def reply_rand_kb(acc_id, active, back_to=None):
+def reply_rand_kb(acc_id, active, back_to=None, group_tag="ALL", acc_tag="ALL"):
     lbl = "🔴 غیرفعال" if active else "🟢 فعال"
     back = back_to or f"acc_manage_{acc_id}"
+    gtag = f"🏷 {group_tag}" if group_tag not in ("ALL","") else "🏷 همه گروه‌ها"
+    atag = f"👤 {acc_tag}" if acc_tag not in ("ALL","") else "👤 همه اکانت‌ها"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 مدیریت متن‌ها",     callback_data=f"rr_banners_{acc_id}")],
         [InlineKeyboardButton("⏱ تنظیم زمان",        callback_data=f"rr_time_{acc_id}"),
          InlineKeyboardButton(lbl,                    callback_data=f"rr_tog_{acc_id}")],
+        [InlineKeyboardButton(gtag,                   callback_data=f"rr_gtag_{acc_id}"),
+         InlineKeyboardButton(atag,                   callback_data=f"rr_atag_{acc_id}")],
         [InlineKeyboardButton("▶️ اجرای دستی",       callback_data=f"rr_run_{acc_id}")],
         [InlineKeyboardButton("🔙 بازگشت",            callback_data=back)],
     ])
@@ -146,12 +151,16 @@ def reply_banner_list_kb(acc_id, banners, back_to=None):
     return InlineKeyboardMarkup(rows)
 
 # ─── ری‌اکت رندم ────────────────────────────────────────────
-def react_rand_kb(acc_id, active, back_to=None):
+def react_rand_kb(acc_id, active, back_to=None, group_tag="ALL", acc_tag="ALL"):
     lbl = "🔴 غیرفعال" if active else "🟢 فعال"
     back = back_to or f"acc_manage_{acc_id}"
+    gtag = f"🏷 {group_tag}" if group_tag not in ("ALL","") else "🏷 همه گروه‌ها"
+    atag = f"👤 {acc_tag}" if acc_tag not in ("ALL","") else "👤 همه اکانت‌ها"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⏱ تنظیم زمان",  callback_data=f"rc_time_{acc_id}"),
          InlineKeyboardButton(lbl,              callback_data=f"rc_tog_{acc_id}")],
+        [InlineKeyboardButton(gtag,             callback_data=f"rc_gtag_{acc_id}"),
+         InlineKeyboardButton(atag,             callback_data=f"rc_atag_{acc_id}")],
         [InlineKeyboardButton("▶️ اجرای دستی", callback_data=f"rc_run_{acc_id}")],
         [InlineKeyboardButton("🔙 بازگشت",      callback_data=back)],
     ])
@@ -200,8 +209,10 @@ def global_sch_menu_kb():
     ])
 
 # ─── ارسال زمان‌دار همگانی - پنل (گروه/پیوی) ─────────────────
-def global_sch_panel_kb(target, active):
+def global_sch_panel_kb(target, active, gtag="ALL", atag="ALL"):
     lbl = "🔴 خاموش کردن" if active else "🟢 روشن کردن"
+    g_lbl = f"🏷 {gtag}" if gtag != "ALL" else "🏷 همه گروه‌ها"
+    a_lbl = f"👤 {atag}" if atag != "ALL" else "👤 همه اکانت‌ها"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 پیام ۱", callback_data=f"gsch_b1_{target}"),
          InlineKeyboardButton("💬 پیام ۲", callback_data=f"gsch_b2_{target}")],
@@ -209,6 +220,8 @@ def global_sch_panel_kb(target, active):
          InlineKeyboardButton("💬 پیام ۴", callback_data=f"gsch_b4_{target}")],
         [InlineKeyboardButton("⏱ تنظیم زمان", callback_data=f"gsch_time_{target}"),
          InlineKeyboardButton(lbl, callback_data=f"gsch_tog_{target}")],
+        [InlineKeyboardButton(g_lbl, callback_data=f"gsch_gtag_{target}"),
+         InlineKeyboardButton(a_lbl, callback_data=f"gsch_atag_{target}")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="g_sch_menu")],
     ])
 
@@ -230,3 +243,52 @@ def confirm_kb(yes, no):
 
 def back_kb(cb):
     return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=cb)]])
+
+# ─── مدیریت برچسب‌ها ────────────────────────────────────────
+def tags_menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👥 برچسب گروه‌ها", callback_data="tags_groups")],
+        [InlineKeyboardButton("👤 برچسب اکانت‌ها", callback_data="tags_accounts")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
+    ])
+
+def tags_list_kb(tags, context="groups"):
+    """لیست برچسب‌ها با امکان حذف"""
+    rows = []
+    for t in tags:
+        rows.append([InlineKeyboardButton(
+            f"🗑 حذف «{t}»", callback_data=f"tag_del_{context}_{t}"
+        )])
+    rows.append([InlineKeyboardButton("➕ برچسب جدید", callback_data=f"tag_new_{context}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="tags_menu")])
+    return InlineKeyboardMarkup(rows)
+
+def tag_select_kb(tags, callback_prefix, show_no_tag=True, show_all=True):
+    """انتخاب برچسب برای فیلتر عملیات"""
+    rows = []
+    for t in tags:
+        rows.append([InlineKeyboardButton(
+            f"🏷 {t}", callback_data=f"{callback_prefix}_tag_{t}"
+        )])
+    if show_no_tag:
+        rows.append([InlineKeyboardButton(
+            "🔘 بدون برچسب", callback_data=f"{callback_prefix}_tag_NOTAG"
+        )])
+    if show_all:
+        rows.append([InlineKeyboardButton(
+            "📋 همه", callback_data=f"{callback_prefix}_tag_ALL"
+        )])
+    return InlineKeyboardMarkup(rows)
+
+def account_tag_kb(accounts):
+    """لیست اکانت‌ها برای تنظیم برچسب"""
+    rows = []
+    for a in accounts:
+        tag_str = f" [{a[3]}]" if a[3] else ""
+        rows.append([InlineKeyboardButton(
+            f"👤 {a[1]} | {a[2]}{tag_str}",
+            callback_data=f"acctag_sel_{a[0]}"
+        )])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="tags_menu")])
+    return InlineKeyboardMarkup(rows)
+

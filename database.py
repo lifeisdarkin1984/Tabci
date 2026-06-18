@@ -99,7 +99,9 @@ def init_db():
             interval_minutes INT DEFAULT 30,
             is_active TINYINT DEFAULT 0,
             last_run BIGINT DEFAULT 0,
-            last_index INT DEFAULT 0
+            last_index INT DEFAULT 0,
+            group_tag_filter VARCHAR(100) DEFAULT 'ALL',
+            acc_tag_filter VARCHAR(100) DEFAULT 'ALL'
         )""",
         """CREATE TABLE IF NOT EXISTS reply_rand_banners (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -116,7 +118,24 @@ def init_db():
             admin_id BIGINT,
             interval_minutes INT DEFAULT 30,
             is_active TINYINT DEFAULT 0,
-            last_run BIGINT DEFAULT 0
+            last_run BIGINT DEFAULT 0,
+            group_tag_filter VARCHAR(100) DEFAULT 'ALL',
+            acc_tag_filter VARCHAR(100) DEFAULT 'ALL'
+        )""",
+        """CREATE TABLE IF NOT EXISTS tags (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            name VARCHAR(100) NOT NULL,
+            UNIQUE KEY uniq_tag (admin_id, name)
+        )""",
+        """CREATE TABLE IF NOT EXISTS group_tags (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            account_id VARCHAR(50),
+            chat_id BIGINT,
+            chat_title VARCHAR(255) DEFAULT '',
+            tag_name VARCHAR(100) DEFAULT '',
+            UNIQUE KEY uniq_group (admin_id, account_id, chat_id)
         )""",
         """CREATE TABLE IF NOT EXISTS global_scheduler (
             admin_id BIGINT,
@@ -125,6 +144,8 @@ def init_db():
             is_active TINYINT DEFAULT 0,
             last_run BIGINT DEFAULT 0,
             last_index INT DEFAULT 0,
+            group_tag_filter VARCHAR(100) DEFAULT 'ALL',
+            acc_tag_filter VARCHAR(100) DEFAULT 'ALL',
             PRIMARY KEY (admin_id, target)
         )""",
         """CREATE TABLE IF NOT EXISTS global_banners (
@@ -157,7 +178,14 @@ def init_db():
 
     new_columns = [
         ("accounts", "auto_leave_limited", "TINYINT DEFAULT 0"),
+        ("accounts", "tag", "VARCHAR(100) DEFAULT ''"),
         ("reply_rand", "last_index", "INT DEFAULT 0"),
+        ("reply_rand", "group_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
+        ("reply_rand", "acc_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
+        ("react_rand", "group_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
+        ("react_rand", "acc_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
+        ("global_scheduler", "group_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
+        ("global_scheduler", "acc_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
     ]
     for table, col, definition in new_columns:
         if not column_exists(table, col):
