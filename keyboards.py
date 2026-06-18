@@ -209,10 +209,14 @@ def global_sch_menu_kb():
     ])
 
 # ─── ارسال زمان‌دار همگانی - پنل (گروه/پیوی) ─────────────────
-def global_sch_panel_kb(target, active, gtag="ALL", atag="ALL"):
+def global_sch_panel_kb(target, active, gtag="ALL", atag="ALL", max_rounds=0, current_round=0):
     lbl = "🔴 خاموش کردن" if active else "🟢 روشن کردن"
     g_lbl = f"🏷 {gtag}" if gtag != "ALL" else "🏷 همه گروه‌ها"
     a_lbl = f"👤 {atag}" if atag != "ALL" else "👤 همه اکانت‌ها"
+    if max_rounds == 0:
+        rounds_lbl = "🔄 دور: نامحدود"
+    else:
+        rounds_lbl = f"🔄 دور: {current_round}/{max_rounds}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 پیام ۱", callback_data=f"gsch_b1_{target}"),
          InlineKeyboardButton("💬 پیام ۲", callback_data=f"gsch_b2_{target}")],
@@ -222,6 +226,7 @@ def global_sch_panel_kb(target, active, gtag="ALL", atag="ALL"):
          InlineKeyboardButton(lbl, callback_data=f"gsch_tog_{target}")],
         [InlineKeyboardButton(g_lbl, callback_data=f"gsch_gtag_{target}"),
          InlineKeyboardButton(a_lbl, callback_data=f"gsch_atag_{target}")],
+        [InlineKeyboardButton(rounds_lbl, callback_data=f"gsch_rounds_{target}")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="g_sch_menu")],
     ])
 

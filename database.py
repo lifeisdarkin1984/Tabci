@@ -146,6 +146,8 @@ def init_db():
             last_index INT DEFAULT 0,
             group_tag_filter VARCHAR(100) DEFAULT 'ALL',
             acc_tag_filter VARCHAR(100) DEFAULT 'ALL',
+            max_rounds INT DEFAULT 0,
+            current_round INT DEFAULT 0,
             PRIMARY KEY (admin_id, target)
         )""",
         """CREATE TABLE IF NOT EXISTS global_banners (
@@ -186,6 +188,8 @@ def init_db():
         ("react_rand", "acc_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
         ("global_scheduler", "group_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
         ("global_scheduler", "acc_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
+        ("global_scheduler", "max_rounds", "INT DEFAULT 0"),
+        ("global_scheduler", "current_round", "INT DEFAULT 0"),
     ]
     for table, col, definition in new_columns:
         if not column_exists(table, col):
