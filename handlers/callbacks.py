@@ -832,9 +832,20 @@ def register(app):
 
             elif d == "g_sgrp_go":
                 msg_text = get_step_data(ADMIN_ID)
-                set_step(ADMIN_ID, "g_sgrp_atag", msg_text)
                 tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
+                if not tag_list:
+                    # هیچ برچسبی تعریف نشده - مستقیم با همه شروع کن
+                    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                    set_stop(False)
+                    await cb.message.edit_text(f"⏳ ارسال به {len(accs)} اکانت شروع شد...")
+                    for (aid,) in accs:
+                        t = asyncio.create_task(_send_to_groups_task(client, aid, msg_text,
+                                                                       group_tag_filter="ALL"))
+                        t.set_name("send_grp_task")
+                    clear_step(ADMIN_ID)
+                    return
+                set_step(ADMIN_ID, "g_sgrp_atag", msg_text)
                 await cb.message.edit_text(
                     "👤 ارسال با کدوم اکانت‌ها؟",
                     reply_markup=tag_select_kb(tag_list, "gsgrpatag")
@@ -1208,8 +1219,16 @@ def register(app):
             elif d == "gsec_tog":
                 row = q("SELECT COUNT(*) FROM secretary WHERE is_active=1 AND admin_id=%s", (ADMIN_ID,))
                 new = 0 if (row[0][0] if row else 0) > 0 else 1
-                u("UPDATE secretary SET is_active=%s WHERE admin_id=%s", (new, ADMIN_ID))
+                # اگه هیچ ردیفی وجود نداره، برای همه اکانت‌ها بساز
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                for (aid,) in accs:
+                    u("INSERT INTO secretary (account_id,admin_id,is_active,replied_users) "
+                      "VALUES(%s,%s,%s,'') ON DUPLICATE KEY UPDATE is_active=%s",
+                      (aid, ADMIN_ID, new, new))
                 await cb.answer(f"منشی همگانی {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
+                row2 = q("SELECT COUNT(*) FROM secretary WHERE is_active=1 AND admin_id=%s", (ADMIN_ID,))
+                active2 = (row2[0][0] if row2 else 0) > 0
+                await cb.message.edit_reply_markup(global_sec_kb(active2))
 
             elif d == "g_rr":
                 row = q("SELECT is_active,interval_minutes,message_text FROM reply_rand WHERE account_id='global'")
