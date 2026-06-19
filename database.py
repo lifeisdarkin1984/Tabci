@@ -62,7 +62,8 @@ def init_db():
             text MEDIUMTEXT,
             file_id VARCHAR(300) DEFAULT '',
             file_type VARCHAR(30) DEFAULT '',
-            context VARCHAR(30) DEFAULT 'secretary'
+            context VARCHAR(30) DEFAULT 'secretary',
+            UNIQUE KEY uniq_banner (account_id, slot, context)
         )""",
         """CREATE TABLE IF NOT EXISTS scheduler (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -212,6 +213,33 @@ def init_db():
             print("[DB init] upgraded step_data to MEDIUMTEXT")
     except Exception as e:
         print(f"[DB init] {e}")
+
+    # ── پاکسازی رکوردهای تکراری در banners و اضافه کردن UNIQUE KEY ──
+    try:
+        # چک آیا UNIQUE KEY از قبل وجود داره
+        cur.execute(
+            "SELECT COUNT(*) FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='banners' AND INDEX_NAME='uniq_banner'",
+            (os.environ["MYSQLDATABASE"],)
+        )
+        has_unique = cur.fetchone()[0] > 0
+        if not has_unique:
+            # حذف رکوردهای تکراری - فقط جدیدترین id برای هر (account_id, slot, context) نگه دار
+            cur.execute("""
+                DELETE b1 FROM banners b1
+                INNER JOIN banners b2
+                WHERE b1.account_id = b2.account_id
+                AND b1.slot = b2.slot
+                AND b1.context = b2.context
+                AND b1.id < b2.id
+            """)
+            deleted = cur.rowcount
+            # اضافه کردن UNIQUE KEY
+            cur.execute("ALTER TABLE banners ADD UNIQUE KEY uniq_banner (account_id, slot, context)")
+            print(f"[DB init] banners deduplicated ({deleted} removed) + UNIQUE KEY added")
+    except Exception as e:
+        print(f"[DB init] banners migration: {e}")
+
     db.commit()
     db.close()
     print("✅ DB ready")
