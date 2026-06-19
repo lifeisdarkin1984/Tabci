@@ -4,6 +4,8 @@ from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
 from database import q, u
 from utils import get_user_client, ADMIN_ID, is_stopped, record_flood, is_in_cooldown, reset_flood
 
+BOT_CLIENT = None  # توسط main.py تنظیم می‌شود
+
 
 async def _send_banner(uc, chat_id, bt, bf, bft):
     if bf:
@@ -40,21 +42,27 @@ async def _run_for_target(target):
         (ADMIN_ID, target)
     )
     if not banners:
+        print(f"[GlobalScheduler:{target}] هیچ پیامی تنظیم نشده، رد شد")
         return
 
     idx = last_index % len(banners)
     _, bt, bf, bft = banners[idx]
     new_index = idx + 1
 
-    # چک آیا یک دور کامل شده
     round_complete = (new_index >= len(banners))
     new_round = current_round + (1 if round_complete else 0)
 
-    # اگه max_rounds تنظیم شده و به سقف رسیده، غیرفعال کن
     if max_rounds > 0 and new_round > max_rounds:
         u("UPDATE global_scheduler SET is_active=0, last_index=0, current_round=0 "
           "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
         print(f"[GlobalScheduler:{target}] {max_rounds} دور کامل شد، غیرفعال شد.")
+        if BOT_CLIENT:
+            try:
+                await BOT_CLIENT.send_message(
+                    ADMIN_ID, f"✅ ارسال زمان‌دار {target} پس از {max_rounds} دور کامل شد و خاموش شد."
+                )
+            except Exception:
+                pass
         return
 
     chat_type_filter = (
@@ -63,7 +71,6 @@ async def _run_for_target(target):
         (enums.ChatType.PRIVATE,)
     )
 
-    # فیلتر اکانت‌ها بر اساس برچسب
     if atag not in ("ALL", ""):
         if atag == "NOTAG":
             accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
@@ -74,19 +81,33 @@ async def _run_for_target(target):
     else:
         accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
 
+    if not accs:
+        print(f"[GlobalScheduler:{target}] هیچ اکانت فعالی با فیلتر {atag} پیدا نشد")
+        if BOT_CLIENT:
+            try:
+                await BOT_CLIENT.send_message(
+                    ADMIN_ID, f"⚠️ ارسال زمان‌دار {target}: هیچ اکانتی با فیلتر «{atag}» پیدا نشد."
+                )
+            except Exception:
+                pass
+        return
+
+    total_ok = total_fail = total_skipped_cooldown = 0
+
     for (acc_id,) in accs:
         if is_stopped():
             break
         if is_in_cooldown(acc_id):
             print(f"[GlobalScheduler:{target}] اکانت {acc_id} در cooldown، رد شد")
+            total_skipped_cooldown += 1
             continue
         uc = await get_user_client(acc_id)
         if not uc:
+            print(f"[GlobalScheduler:{target}] اکانت {acc_id} session نداره")
             continue
         try:
             await uc.start()
 
-            # فیلتر گروه‌ها بر اساس برچسب (فقط برای groups)
             allowed_chats = None
             if target == "groups" and gtag not in ("ALL", ""):
                 if gtag == "NOTAG":
@@ -97,7 +118,6 @@ async def _run_for_target(target):
                              (ADMIN_ID, acc_id, gtag))
                 allowed_chats = set(r[0] for r in rows)
 
-            # مرتب‌سازی — فعال‌ترین اول
             dialogs = []
             async for dlg in uc.get_dialogs():
                 if dlg.chat.type not in chat_type_filter:
@@ -108,28 +128,34 @@ async def _run_for_target(target):
                 dialogs.append((last_ts, dlg))
             dialogs.sort(key=lambda x: x[0], reverse=True)
 
+            acc_ok = acc_fail = 0
             for _, dlg in dialogs:
                 if is_stopped():
                     break
                 try:
                     await _send_banner(uc, dlg.chat.id, bt, bf, bft)
                     reset_flood(acc_id)
+                    acc_ok += 1
                     await asyncio.sleep(random.uniform(1.5, 4))
                 except FloodWait as e:
                     entered = record_flood(acc_id)
                     if entered:
                         break
                     await asyncio.sleep(min(e.value, 60))
-                except Exception:
-                    pass
+                except Exception as e:
+                    acc_fail += 1
+                    print(f"[GlobalScheduler:{target}] خطا در ارسال به {dlg.chat.id} ({acc_id}): {e}")
 
+            total_ok += acc_ok
+            total_fail += acc_fail
             await uc.stop()
         except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
             u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
+            print(f"[GlobalScheduler:{target}] اکانت {acc_id} منقضی شد")
             try: await uc.stop()
             except Exception: pass
         except Exception as e:
-            print(f"[GlobalScheduler:{target}] خطا در {acc_id}: {e}")
+            print(f"[GlobalScheduler:{target}] خطای کلی در {acc_id}: {e}")
             try: await uc.stop()
             except Exception: pass
 
@@ -138,6 +164,21 @@ async def _run_for_target(target):
         "WHERE admin_id=%s AND target=%s",
         (now, new_index % len(banners), new_round, ADMIN_ID, target)
     )
+
+    # گزارش به ادمین
+    if BOT_CLIENT:
+        title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
+        report = (
+            f"⏰ ارسال زمان‌دار {title} — پیام {idx+1}/{len(banners)} ارسال شد\n"
+            f"✔️ موفق: {total_ok}\n❌ ناموفق: {total_fail}\n"
+            f"📨 اکانت‌های پردازش‌شده: {len(accs)}"
+        )
+        if total_skipped_cooldown:
+            report += f"\n⏸ اکانت‌های در استراحت: {total_skipped_cooldown}"
+        try:
+            await BOT_CLIENT.send_message(ADMIN_ID, report)
+        except Exception as e:
+            print(f"[GlobalScheduler:{target}] خطا در ارسال گزارش: {e}")
 
 
 async def run():
