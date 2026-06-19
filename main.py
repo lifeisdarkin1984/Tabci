@@ -31,6 +31,7 @@ async def main():
 
     await app.start()
     print("✅ Tabchi Personal bot is running...")
+    global_scheduler.BOT_CLIENT = app
 
     await asyncio.gather(
         secretary.run(),
