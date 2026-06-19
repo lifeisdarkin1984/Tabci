@@ -12,24 +12,33 @@ async def _reply_to_pvs(uc, acc_id, banners, replied):
         uid = str(dlg.chat.id)
         if uid in replied:
             continue
-        async for msg in uc.get_chat_history(dlg.chat.id, limit=1):
+        # چک می‌کنیم آیا کاربر اصلاً پیامی فرستاده (نه فقط آخرین پیام)
+        user_sent = False
+        async for msg in uc.get_chat_history(dlg.chat.id, limit=20):
             if msg.from_user and str(msg.from_user.id) == uid:
-                for b in banners:
-                    txt, fid, ftype = b
-                    try:
-                        if fid:
-                            if ftype == "photo":
-                                await uc.send_photo(dlg.chat.id, fid, caption=txt)
-                            elif ftype == "video":
-                                await uc.send_video(dlg.chat.id, fid, caption=txt)
-                            else:
-                                await uc.send_document(dlg.chat.id, fid, caption=txt)
-                        else:
-                            await uc.send_message(dlg.chat.id, txt)
-                        await asyncio.sleep(2)
-                    except Exception:
-                        pass
-                replied.add(uid)
+                user_sent = True
+                break
+        if not user_sent:
+            continue
+        for b in banners:
+            txt, fid, ftype = b
+            if not txt and not fid:
+                print(f"[Secretary] بنر خالی برای {acc_id}، رد شد")
+                continue
+            try:
+                if fid:
+                    if ftype == "photo":
+                        await uc.send_photo(dlg.chat.id, fid, caption=txt or "")
+                    elif ftype == "video":
+                        await uc.send_video(dlg.chat.id, fid, caption=txt or "")
+                    else:
+                        await uc.send_document(dlg.chat.id, fid, caption=txt or "")
+                else:
+                    await uc.send_message(dlg.chat.id, txt)
+                await asyncio.sleep(2)
+            except Exception as e:
+                print(f"[Secretary] خطا در ارسال بنر به {uid}: {e}")
+        replied.add(uid)
     return replied
 
 async def run():
