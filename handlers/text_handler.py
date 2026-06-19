@@ -640,19 +640,34 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
     allowed_chats = get_filtered_chat_ids(acc_id, group_tag_filter)
 
     ok = fail = limited = force_joined = left = 0
-    await uc.start()
+
+    try:
+        await uc.start()
+    except Exception as e:
+        print(f"[SendGroups] خطا در اتصال اکانت {acc_id}: {e}")
+        await bot_client.send_message(ADMIN_ID, f"❌ اتصال اکانت {display} ناموفق بود: {e}")
+        return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0,
+                "display": display, "skipped": True}
 
     # مرتب‌سازی گروه‌ها — فعال‌ترین اول
-    dialogs = []
-    async for dlg in uc.get_dialogs():
-        if dlg.chat.type not in (en.ChatType.GROUP, en.ChatType.SUPERGROUP):
-            continue
-        # اعمال فیلتر برچسب
-        if allowed_chats is not None and dlg.chat.id not in allowed_chats:
-            continue
-        last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
-        dialogs.append((last_ts, dlg))
-    dialogs.sort(key=lambda x: x[0], reverse=True)
+    try:
+        dialogs = []
+        async for dlg in uc.get_dialogs():
+            if dlg.chat.type not in (en.ChatType.GROUP, en.ChatType.SUPERGROUP):
+                continue
+            # اعمال فیلتر برچسب
+            if allowed_chats is not None and dlg.chat.id not in allowed_chats:
+                continue
+            last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
+            dialogs.append((last_ts, dlg))
+        dialogs.sort(key=lambda x: x[0], reverse=True)
+    except Exception as e:
+        print(f"[SendGroups] خطا در گرفتن لیست گروه‌ها برای {acc_id}: {e}")
+        try: await uc.stop()
+        except Exception: pass
+        await bot_client.send_message(ADMIN_ID, f"❌ خطا در خواندن گروه‌های {display}: {e}")
+        return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0,
+                "display": display, "skipped": True}
 
     for _, dlg in dialogs:
         if is_stopped():

@@ -1273,20 +1273,87 @@ def register(app):
 
 async def _send_to_pvs(bot_client, acc_id, text):
     from pyrogram import enums as en
+    from pyrogram.errors import FloodWait, UserIsBlocked, PeerIdInvalid, UserDeactivated as UD
+    from utils import record_flood, is_in_cooldown, reset_flood
+
     uc = await get_user_client(acc_id)
-    if not uc: return
+    if not uc:
+        print(f"[SendPV] اکانت {acc_id} session نداره")
+        return
+
     me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
     display = me_info[0][0] if me_info else acc_id
-    ok = fail = 0
-    await uc.start()
-    async for dlg in uc.get_dialogs():
-        if is_stopped(): break
-        if dlg.chat.type == en.ChatType.PRIVATE:
+
+    if is_in_cooldown(acc_id):
+        await bot_client.send_message(ADMIN_ID, f"⏸ اکانت {display} در حالت استراحت است، رد شد.")
+        return
+
+    ok = fail = blocked = flood_skipped = 0
+    error_samples = []
+
+    try:
+        await uc.start()
+    except Exception as e:
+        print(f"[SendPV] خطا در اتصال {acc_id}: {e}")
+        await bot_client.send_message(ADMIN_ID, f"❌ اتصال اکانت {display} ناموفق: {e}")
+        return
+
+    try:
+        dialogs = []
+        async for dlg in uc.get_dialogs():
+            if dlg.chat.type == en.ChatType.PRIVATE:
+                dialogs.append(dlg)
+    except Exception as e:
+        print(f"[SendPV] خطا در گرفتن لیست پیوی‌ها {acc_id}: {e}")
+        await bot_client.send_message(ADMIN_ID, f"❌ خطا در خواندن پیوی‌های {display}: {e}")
+        try: await uc.stop()
+        except Exception: pass
+        return
+
+    for dlg in dialogs:
+        if is_stopped():
+            break
+        try:
+            await uc.send_message(dlg.chat.id, text)
+            ok += 1
+            reset_flood(acc_id)
+            await asyncio.sleep(2)
+        except FloodWait as e:
+            entered = record_flood(acc_id)
+            if entered:
+                await bot_client.send_message(
+                    ADMIN_ID,
+                    f"⚠️ اکانت {display} بعد از چند FloodWait وارد استراحت ۲ ساعته شد. "
+                    f"({ok} موفق تا اینجا، باقی رد شدند)"
+                )
+                flood_skipped = len(dialogs) - ok - fail
+                break
+            await asyncio.sleep(min(e.value, 60))
             try:
-                await uc.send_message(dlg.chat.id, text); ok += 1; await asyncio.sleep(2)
-            except Exception: fail += 1
-    await uc.stop()
-    await bot_client.send_message(ADMIN_ID, f"✅ پیوی‌ها\n👤 {display}\n✔️ {ok}\n❌ {fail}")
+                await uc.send_message(dlg.chat.id, text); ok += 1
+            except Exception:
+                fail += 1
+        except UserIsBlocked:
+            blocked += 1
+        except (PeerIdInvalid, UD):
+            fail += 1
+        except Exception as e:
+            fail += 1
+            if len(error_samples) < 3:
+                error_samples.append(str(e)[:80])
+            print(f"[SendPV] خطا در ارسال به {dlg.chat.id} ({acc_id}): {e}")
+
+    try:
+        await uc.stop()
+    except Exception:
+        pass
+
+    report = f"✅ پیوی‌ها\n👤 {display}\n✔️ موفق: {ok}\n🚫 بلاک شده: {blocked}\n❌ خطا: {fail}"
+    if flood_skipped > 0:
+        report += f"\n⏸ رد شده (FloodWait): {flood_skipped}"
+    if error_samples:
+        report += "\n\n❗️ نمونه خطاها:\n" + "\n".join(error_samples)
+    await bot_client.send_message(ADMIN_ID, report)
 
 
 async def _send_to_groups_task(bot_client, acc_id, text, group_tag_filter="ALL"):
