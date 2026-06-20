@@ -1,8 +1,9 @@
 import asyncio, time, random
 from pyrogram import enums
-from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired, FloodWait
+from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired, FloodWait, \
+    ChatWriteForbidden, UserBannedInChannel, ChatRestricted, ChatSendMediaForbidden
 from database import q, u
-from utils import get_user_client, ADMIN_ID, is_stopped, record_flood, is_in_cooldown, reset_flood
+from utils import get_user_client, ADMIN_ID, is_stopped
 
 BOT_CLIENT = None  # توسط main.py تنظیم می‌شود
 
@@ -92,15 +93,11 @@ async def _run_for_target(target):
                 pass
         return
 
-    total_ok = total_fail = total_skipped_cooldown = 0
+    total_ok = total_fail = total_limited = 0
 
     for (acc_id,) in accs:
         if is_stopped():
             break
-        if is_in_cooldown(acc_id):
-            print(f"[GlobalScheduler:{target}] اکانت {acc_id} در cooldown، رد شد")
-            total_skipped_cooldown += 1
-            continue
         uc = await get_user_client(acc_id)
         if not uc:
             print(f"[GlobalScheduler:{target}] اکانت {acc_id} session نداره")
@@ -124,30 +121,37 @@ async def _run_for_target(target):
                     continue
                 if allowed_chats is not None and dlg.chat.id not in allowed_chats:
                     continue
-                last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
-                dialogs.append((last_ts, dlg))
-            dialogs.sort(key=lambda x: x[0], reverse=True)
+                dialogs.append(dlg)
 
-            acc_ok = acc_fail = 0
-            for _, dlg in dialogs:
+            acc_ok = acc_fail = acc_limited = 0
+            for dlg in dialogs:
                 if is_stopped():
                     break
                 try:
                     await _send_banner(uc, dlg.chat.id, bt, bf, bft)
-                    reset_flood(acc_id)
                     acc_ok += 1
                     await asyncio.sleep(random.uniform(1.5, 4))
                 except FloodWait as e:
-                    entered = record_flood(acc_id)
-                    if entered:
-                        break
-                    await asyncio.sleep(min(e.value, 60))
+                    # صبر می‌کنیم و همین گروه را دوباره امتحان می‌کنیم، بقیه گروه‌ها رو ول نمی‌کنیم
+                    wait_s = min(e.value, 120)
+                    await asyncio.sleep(wait_s)
+                    try:
+                        await _send_banner(uc, dlg.chat.id, bt, bf, bft)
+                        acc_ok += 1
+                    except Exception:
+                        acc_fail += 1
+                    await asyncio.sleep(random.uniform(1.5, 4))
+                except (ChatWriteForbidden, UserBannedInChannel, ChatRestricted,
+                        ChatSendMediaForbidden):
+                    # گروه واقعاً محدوده - فقط همین یکی رد میشه
+                    acc_limited += 1
                 except Exception as e:
                     acc_fail += 1
                     print(f"[GlobalScheduler:{target}] خطا در ارسال به {dlg.chat.id} ({acc_id}): {e}")
 
             total_ok += acc_ok
             total_fail += acc_fail
+            total_limited += acc_limited
             await uc.stop()
         except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
             u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
@@ -170,11 +174,9 @@ async def _run_for_target(target):
         title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
         report = (
             f"⏰ ارسال زمان‌دار {title} — پیام {idx+1}/{len(banners)} ارسال شد\n"
-            f"✔️ موفق: {total_ok}\n❌ ناموفق: {total_fail}\n"
+            f"✔️ موفق: {total_ok}\n❌ ناموفق: {total_fail}\n🚫 محدود: {total_limited}\n"
             f"📨 اکانت‌های پردازش‌شده: {len(accs)}"
         )
-        if total_skipped_cooldown:
-            report += f"\n⏸ اکانت‌های در استراحت: {total_skipped_cooldown}"
         try:
             await BOT_CLIENT.send_message(ADMIN_ID, report)
         except Exception as e:

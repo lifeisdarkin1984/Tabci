@@ -2,7 +2,7 @@ import asyncio, random, time
 from pyrogram import enums
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired, FloodWait
 from database import q, u
-from utils import get_user_client, ADMIN_ID, record_flood, is_in_cooldown, reset_flood
+from utils import get_user_client, ADMIN_ID
 
 STOP_FLAG = False
 
@@ -18,9 +18,6 @@ async def get_available_reactions(uc, chat_id):
     return FALLBACK_EMOJIS
 
 async def run_once(acc_id, group_tag_filter="ALL"):
-    if is_in_cooldown(acc_id):
-        print(f"[ReactWorker] اکانت {acc_id} در cooldown است، رد شد")
-        return
     uc = await get_user_client(acc_id)
     if not uc:
         return
@@ -38,18 +35,15 @@ async def run_once(acc_id, group_tag_filter="ALL"):
     try:
         await uc.start()
 
-        # مرتب‌سازی گروه‌ها بر اساس آخرین پیام (فعال‌ترین اول)
         dialogs = []
         async for dlg in uc.get_dialogs():
             if dlg.chat.type not in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
                 continue
             if allowed_chats is not None and dlg.chat.id not in allowed_chats:
                 continue
-            last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
-            dialogs.append((last_ts, dlg))
-        dialogs.sort(key=lambda x: x[0], reverse=True)
+            dialogs.append(dlg)
 
-        for _, dlg in dialogs:
+        for dlg in dialogs:
             if STOP_FLAG:
                 break
             try:
@@ -75,15 +69,12 @@ async def run_once(acc_id, group_tag_filter="ALL"):
                 reactions = await get_available_reactions(uc, dlg.chat.id)
                 emoji = random.choice(reactions)
                 await uc.send_reaction(dlg.chat.id, target.id, emoji)
-                reset_flood(acc_id)
                 # فاصله تصادفی بین گروه‌ها
                 await asyncio.sleep(random.uniform(3, 8))
 
             except FloodWait as e:
-                entered_cooldown = record_flood(acc_id)
-                if entered_cooldown:
-                    break
-                await asyncio.sleep(e.value * 2)
+                # صبر می‌کنیم و گروه بعدی رو ادامه می‌دیم، اکانت رو کنار نمی‌ذاریم
+                await asyncio.sleep(min(e.value, 120))
             except Exception:
                 continue
 
