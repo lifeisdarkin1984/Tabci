@@ -621,14 +621,9 @@ def get_filtered_chat_ids(acc_id, tag_filter):
 async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group_tag_filter="ALL"):
     """ارسال پیام هوشمند با تشخیص محدودیت و عضویت اجبار"""
     from pyrogram import enums as en
-    from utils import record_flood, is_in_cooldown, reset_flood
     uc = await get_user_client(acc_id)
     if not uc:
         return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0}
-
-    if is_in_cooldown(acc_id):
-        return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0,
-                "display": acc_id, "skipped": True}
 
     me_info = q("SELECT phone, auto_leave_limited FROM accounts WHERE id=%s", (acc_id,))
     display = me_info[0][0] if me_info else acc_id
@@ -649,7 +644,6 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
         return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0,
                 "display": display, "skipped": True}
 
-    # مرتب‌سازی گروه‌ها — فعال‌ترین اول
     try:
         dialogs = []
         async for dlg in uc.get_dialogs():
@@ -658,9 +652,7 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
             # اعمال فیلتر برچسب
             if allowed_chats is not None and dlg.chat.id not in allowed_chats:
                 continue
-            last_ts = dlg.top_message.date.timestamp() if dlg.top_message else 0
-            dialogs.append((last_ts, dlg))
-        dialogs.sort(key=lambda x: x[0], reverse=True)
+            dialogs.append(dlg)
     except Exception as e:
         print(f"[SendGroups] خطا در گرفتن لیست گروه‌ها برای {acc_id}: {e}")
         try: await uc.stop()
@@ -669,13 +661,12 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
         return {"ok": 0, "fail": 0, "limited": 0, "force_joined": 0, "left": 0,
                 "display": display, "skipped": True}
 
-    for _, dlg in dialogs:
+    for dlg in dialogs:
         if is_stopped():
             break
         try:
             await uc.send_message(dlg.chat.id, text)
             ok += 1
-            reset_flood(acc_id)
             # فاصله تصادفی بین گروه‌ها
             await asyncio.sleep(random.uniform(1.5, 4))
 
@@ -710,17 +701,12 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
             limited += 1
 
         except FloodWait as e:
-            entered_cooldown = record_flood(acc_id)
+            # صبر می‌کنیم و همین گروه را دوباره امتحان می‌کنیم، بقیه گروه‌ها رو ول نمی‌کنیم
+            wait_s = min(e.value, 120)
             await bot_client.send_message(
-                ADMIN_ID, f"❗️ محدودیت {e.value} ثانیه\n👤 {display}"
+                ADMIN_ID, f"❗️ محدودیت {wait_s} ثانیه — صبر و ادامه\n👤 {display}"
             )
-            if entered_cooldown:
-                await bot_client.send_message(
-                    ADMIN_ID,
-                    f"⚠️ اکانت {display} بعد از چند FloodWait وارد حالت استراحت ۲ ساعته شد."
-                )
-                break
-            await asyncio.sleep(e.value * 2)
+            await asyncio.sleep(wait_s)
             try:
                 await uc.send_message(dlg.chat.id, text); ok += 1
             except Exception: fail += 1

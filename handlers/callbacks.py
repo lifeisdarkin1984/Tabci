@@ -1274,7 +1274,6 @@ def register(app):
 async def _send_to_pvs(bot_client, acc_id, text):
     from pyrogram import enums as en
     from pyrogram.errors import FloodWait, UserIsBlocked, PeerIdInvalid, UserDeactivated as UD
-    from utils import record_flood, is_in_cooldown, reset_flood
 
     uc = await get_user_client(acc_id)
     if not uc:
@@ -1284,11 +1283,7 @@ async def _send_to_pvs(bot_client, acc_id, text):
     me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
     display = me_info[0][0] if me_info else acc_id
 
-    if is_in_cooldown(acc_id):
-        await bot_client.send_message(ADMIN_ID, f"⏸ اکانت {display} در حالت استراحت است، رد شد.")
-        return
-
-    ok = fail = blocked = flood_skipped = 0
+    ok = fail = blocked = 0
     error_samples = []
 
     try:
@@ -1316,19 +1311,11 @@ async def _send_to_pvs(bot_client, acc_id, text):
         try:
             await uc.send_message(dlg.chat.id, text)
             ok += 1
-            reset_flood(acc_id)
             await asyncio.sleep(2)
         except FloodWait as e:
-            entered = record_flood(acc_id)
-            if entered:
-                await bot_client.send_message(
-                    ADMIN_ID,
-                    f"⚠️ اکانت {display} بعد از چند FloodWait وارد استراحت ۲ ساعته شد. "
-                    f"({ok} موفق تا اینجا، باقی رد شدند)"
-                )
-                flood_skipped = len(dialogs) - ok - fail
-                break
-            await asyncio.sleep(min(e.value, 60))
+            # صبر می‌کنیم و همین کاربر رو دوباره امتحان می‌کنیم، بقیه رو ول نمی‌کنیم
+            wait_s = min(e.value, 120)
+            await asyncio.sleep(wait_s)
             try:
                 await uc.send_message(dlg.chat.id, text); ok += 1
             except Exception:
@@ -1349,8 +1336,6 @@ async def _send_to_pvs(bot_client, acc_id, text):
         pass
 
     report = f"✅ پیوی‌ها\n👤 {display}\n✔️ موفق: {ok}\n🚫 بلاک شده: {blocked}\n❌ خطا: {fail}"
-    if flood_skipped > 0:
-        report += f"\n⏸ رد شده (FloodWait): {flood_skipped}"
     if error_samples:
         report += "\n\n❗️ نمونه خطاها:\n" + "\n".join(error_samples)
     await bot_client.send_message(ADMIN_ID, report)
