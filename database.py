@@ -86,6 +86,10 @@ def init_db():
             is_active TINYINT DEFAULT 0,
             replied_users MEDIUMTEXT
         )""",
+        """CREATE TABLE IF NOT EXISTS global_secretary_settings (
+            admin_id BIGINT PRIMARY KEY,
+            is_active TINYINT DEFAULT 0
+        )""",
         """CREATE TABLE IF NOT EXISTS join_settings (
             account_id VARCHAR(50) PRIMARY KEY,
             admin_id BIGINT,
