@@ -4,8 +4,12 @@ from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
 from database import q, u
 from utils import get_user_client, ADMIN_ID
 
+BOT_CLIENT = None  # توسط main.py تنظیم می‌شود
+
+
 async def _reply_to_pvs(uc, acc_id, banners, replied):
-    """ارسال بنرها به پیوی‌های جدید"""
+    """ارسال بنرها به پیوی‌های جدید — برمی‌گردونه (replied کامل, new_replied این اجرا)"""
+    new_replied = set()
     async for dlg in uc.get_dialogs():
         if dlg.chat.type != enums.ChatType.PRIVATE:
             continue
@@ -39,7 +43,19 @@ async def _reply_to_pvs(uc, acc_id, banners, replied):
             except Exception as e:
                 print(f"[Secretary] خطا در ارسال بنر به {uid}: {e}")
         replied.add(uid)
-    return replied
+        new_replied.add(uid)
+    return replied, new_replied
+
+
+async def _report(text):
+    if not BOT_CLIENT:
+        return
+    try:
+        await BOT_CLIENT.send_message(ADMIN_ID, text)
+    except Exception as e:
+        print(f"[Secretary] خطا در ارسال گزارش: {e}")
+
+
 
 async def run():
     print("🤖 Secretary worker started")
@@ -67,10 +83,14 @@ async def run():
                     continue
                 try:
                     await uc.start()
-                    replied = await _reply_to_pvs(uc, acc_id, banners, replied)
+                    replied, new_replied = await _reply_to_pvs(uc, acc_id, banners, replied)
                     await uc.stop()
                     u("UPDATE secretary SET replied_users=%s WHERE account_id=%s",
                       (",".join(replied), acc_id))
+                    if new_replied:
+                        phone_row = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
+                        phone = phone_row[0][0] if phone_row else acc_id
+                        await _report(f"🤖 منشی اکانت {phone}: به {len(new_replied)} کاربر جدید پاسخ داده شد.")
                 except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
                     u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
                     print(f"[Secretary] اکانت {acc_id} منقضی شد")
@@ -117,11 +137,15 @@ async def run():
                             continue
                         try:
                             await uc.start()
-                            g_replied = await _reply_to_pvs(uc, acc_id, g_banners, g_replied)
+                            g_replied, g_new_replied = await _reply_to_pvs(uc, acc_id, g_banners, g_replied)
                             await uc.stop()
                             u("INSERT INTO secretary (account_id,admin_id,is_active,replied_users) "
                               "VALUES(%s,%s,0,%s) ON DUPLICATE KEY UPDATE replied_users=%s",
                               (f"g_{acc_id}", ADMIN_ID, ",".join(g_replied), ",".join(g_replied)))
+                            if g_new_replied:
+                                phone_row = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
+                                phone = phone_row[0][0] if phone_row else acc_id
+                                await _report(f"🤖 منشی همگانی [{phone}]: به {len(g_new_replied)} کاربر جدید پاسخ داده شد.")
                         except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
                             u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
                             try: await uc.stop()
