@@ -737,12 +737,11 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
                     await uc.send_message(dlg.chat.id, text)
                     ok += 1
                 except Exception:
-                    fail += 1
                     if auto_leave:
                         try:
                             await uc.leave_chat(dlg.chat.id); left += 1
                         except Exception: pass
-                        limited += 1
+                    limited += 1
             elif auto_leave:
                 try:
                     await uc.leave_chat(dlg.chat.id); left += 1

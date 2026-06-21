@@ -176,6 +176,18 @@ def register(app):
                     u("UPDATE accounts SET auto_leave_limited=%s WHERE id=%s", (new, aid))
                 await cb.answer(f"خروج خودکار {'فعال' if new else 'غیرفعال'} برای همه", show_alert=True)
 
+            # ══ global عضویت اجبار ══
+            elif d == "g_fj_tog":
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                row = q("SELECT force_join_active FROM join_settings WHERE admin_id=%s LIMIT 1", (ADMIN_ID,))
+                cur = row[0][0] if row else 0
+                new = 0 if cur else 1
+                for (aid,) in accs:
+                    u("INSERT INTO join_settings (account_id,admin_id,force_join_active) "
+                      "VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE force_join_active=%s",
+                      (aid, ADMIN_ID, new, new))
+                await cb.answer(f"عضویت اجبار {'فعال' if new else 'غیرفعال'} برای همه", show_alert=True)
+
             # ══ منشی خودکار ══
             elif d.startswith("m_sec_"):
                 acc_id = d[6:]
@@ -936,11 +948,18 @@ def register(app):
                 clear_step(ADMIN_ID)
 
             elif d == "g_fj":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
-                for (aid,) in accs:
-                    u("INSERT INTO join_settings (account_id,admin_id,force_join_active) "
-                      "VALUES(%s,%s,1) ON DUPLICATE KEY UPDATE force_join_active=1", (aid, ADMIN_ID))
-                await cb.answer("✅ عضویت اجبار برای همه فعال شد", show_alert=True)
+                row = q("SELECT force_join_active FROM join_settings WHERE admin_id=%s LIMIT 1", (ADMIN_ID,))
+                active = row[0][0] if row else 0
+                await cb.message.edit_text(
+                    f"🕵️ **عضویت اجبار (همگانی)**\n\n"
+                    f"وضعیت: {'✅ فعال' if active else '❌ غیرفعال'}",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            f"{'🔴 غیرفعال' if active else '🟢 فعال'} برای همه",
+                            callback_data="g_fj_tog")],
+                        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")]
+                    ])
+                )
 
             elif d == "g_sch_menu":
                 await cb.message.edit_text(
@@ -1203,8 +1222,8 @@ def register(app):
                 await cb.message.edit_text(txt, reply_markup=account_tag_kb(accs))
 
             elif d == "g_sec":
-                row = q("SELECT COUNT(*) FROM secretary WHERE is_active=1 AND admin_id=%s", (ADMIN_ID,))
-                active = (row[0][0] if row else 0) > 0
+                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                active = bool(row[0][0]) if row else False
                 await cb.message.edit_text("🤖 **منشی خودکار همگانی**", reply_markup=global_sec_kb(active))
 
             elif d.startswith("gsec_b"):
@@ -1217,18 +1236,12 @@ def register(app):
                 await cb.message.edit_text(txt, reply_markup=banner_slot_kb("global", slot, "g_secretary"))
 
             elif d == "gsec_tog":
-                row = q("SELECT COUNT(*) FROM secretary WHERE is_active=1 AND admin_id=%s", (ADMIN_ID,))
-                new = 0 if (row[0][0] if row else 0) > 0 else 1
-                # اگه هیچ ردیفی وجود نداره، برای همه اکانت‌ها بساز
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
-                for (aid,) in accs:
-                    u("INSERT INTO secretary (account_id,admin_id,is_active,replied_users) "
-                      "VALUES(%s,%s,%s,'') ON DUPLICATE KEY UPDATE is_active=%s",
-                      (aid, ADMIN_ID, new, new))
+                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                new = 0 if (row and row[0][0]) else 1
+                u("INSERT INTO global_secretary_settings (admin_id,is_active) VALUES(%s,%s) "
+                  "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, new, new))
                 await cb.answer(f"منشی همگانی {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
-                row2 = q("SELECT COUNT(*) FROM secretary WHERE is_active=1 AND admin_id=%s", (ADMIN_ID,))
-                active2 = (row2[0][0] if row2 else 0) > 0
-                await cb.message.edit_reply_markup(global_sec_kb(active2))
+                await cb.message.edit_reply_markup(global_sec_kb(bool(new)))
 
             elif d == "g_rr":
                 row = q("SELECT is_active,interval_minutes,message_text FROM reply_rand WHERE account_id='global'")
