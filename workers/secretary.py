@@ -103,11 +103,10 @@ async def run():
 
             # ── منشی همگانی ──
             g_active = q(
-                "SELECT COUNT(*) FROM secretary "
-                "WHERE admin_id=%s AND is_active=1",
+                "SELECT is_active FROM global_secretary_settings WHERE admin_id=%s",
                 (ADMIN_ID,)
             )
-            if g_active and g_active[0][0] > 0:
+            if g_active and g_active[0][0]:
                 g_banners = q(
                     "SELECT text,file_id,file_type FROM banners "
                     "WHERE admin_id=%s AND context='g_secretary' ORDER BY slot",
