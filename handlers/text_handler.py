@@ -7,7 +7,8 @@ from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
     SlowmodeWait, UserBlocked, ChatSendMediaForbidden, RPCError)
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
-                   clear_step, get_user_client, save_account, is_stopped, set_stop)
+                   clear_step, get_user_client, save_account, is_stopped, set_stop,
+                   detect_and_handle_bot_forced_join)
 from keyboards import manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb, react_rand_kb, reply_banner_list_kb
 from handlers.login import send_code, sign_in
 
@@ -455,36 +456,54 @@ async def _extract_links(acc_id, channel, limit):
         return []
     pattern = re.compile(r'https?://t\.me/[^\s\]\)\"\']+')
     links = []
+    BATCH = 200
+    offset_id = 0
     try:
         await uc.start()
-        async for msg in uc.get_chat_history(channel, limit=limit):
-            # ۱. متن پیام
-            txt = (msg.text or "") + " " + (msg.caption or "")
-            links += pattern.findall(txt)
+        while len(links) < limit:
+            batch = []
+            async for msg in uc.get_chat_history(channel, limit=BATCH, offset_id=offset_id):
+                batch.append(msg)
 
-            # ۲. entities (لینک‌های کلیک‌پذیر داخل متن)
-            for entities in [msg.entities or [], msg.caption_entities or []]:
-                for e in entities:
-                    if hasattr(e, 'url') and e.url:
-                        links += pattern.findall(e.url)
+            if not batch:
+                # تاریخچهٔ کانال تمام شده
+                break
 
-            # ۳. دکمه‌های inline
-            if msg.reply_markup:
-                try:
-                    kb = msg.reply_markup
-                    rows = getattr(kb, 'inline_keyboard', None)
-                    if rows:
-                        for row in rows:
-                            for btn in row:
-                                url = getattr(btn, 'url', None)
-                                if url:
-                                    links += pattern.findall(url)
-                except Exception:
-                    pass
+            for msg in batch:
+                # ۱. متن پیام
+                txt = (msg.text or "") + " " + (msg.caption or "")
+                links += pattern.findall(txt)
 
-            # ۴. web preview
-            if msg.web_page and hasattr(msg.web_page, 'url') and msg.web_page.url:
-                links += pattern.findall(msg.web_page.url)
+                # ۲. entities (لینک‌های کلیک‌پذیر داخل متن)
+                for entities in [msg.entities or [], msg.caption_entities or []]:
+                    for e in entities:
+                        if hasattr(e, 'url') and e.url:
+                            links += pattern.findall(e.url)
+
+                # ۳. دکمه‌های inline
+                if msg.reply_markup:
+                    try:
+                        kb = msg.reply_markup
+                        rows = getattr(kb, 'inline_keyboard', None)
+                        if rows:
+                            for row in rows:
+                                for btn in row:
+                                    url = getattr(btn, 'url', None)
+                                    if url:
+                                        links += pattern.findall(url)
+                    except Exception:
+                        pass
+
+                # ۴. web preview
+                if msg.web_page and hasattr(msg.web_page, 'url') and msg.web_page.url:
+                    links += pattern.findall(msg.web_page.url)
+
+            # برای صفحهٔ بعدی، از آخرین پیام این batch ادامه بده
+            offset_id = batch[-1].id
+
+            if len(batch) < BATCH:
+                # یعنی به انتهای تاریخچهٔ کانال رسیدیم
+                break
 
         await uc.stop()
     except Exception as ex:
@@ -494,13 +513,14 @@ async def _extract_links(acc_id, channel, limit):
         except Exception:
             pass
 
-    # پاکسازی: حذف کاراکترهای اضافی از انتها
+    # پاکسازی: حذف کاراکترهای اضافی از انتها + حذف تکراری
     cleaned = []
     for lnk in links:
         lnk = lnk.rstrip('.,;:!?)\"\'')
         if lnk not in cleaned:
             cleaned.append(lnk)
-    return cleaned
+
+    return cleaned[:limit]
 
 
 async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
@@ -541,6 +561,16 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
                 u("INSERT INTO group_tags (admin_id,account_id,chat_id,chat_title,tag_name) "
                   "VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE tag_name=%s, chat_title=%s",
                   (ADMIN_ID, acc_id, result.id, chat_title, tag, tag, chat_title))
+                # چک عضویت اجباری بات‌محور (ربات گروه ممکنه بخواد کانال دیگه‌ای رو هم جوین کنیم)
+                try:
+                    fj_result = await detect_and_handle_bot_forced_join(uc, result.id)
+                    if fj_result.get("forced_join_detected") and fj_result.get("joined"):
+                        await bot_client.send_message(
+                            ADMIN_ID,
+                            f"🔗 عضویت اجباری در `{fj_result['channel']}` تشخیص داده شد و انجام شد."
+                        )
+                except Exception as fj_err:
+                    print(f"[JoinLinks] خطا در تشخیص عضویت اجباری: {fj_err}")
             await bot_client.send_message(ADMIN_ID, f"✅ [{i}/{len(links)}] عضو شد: `{link}`")
 
         except FloodWait as e:
@@ -686,6 +716,11 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
         try:
             await uc.send_message(dlg.chat.id, text)
             ok += 1
+            # تشخیص عضویت اجباری بات‌محور (نه از طرف Telegram بلکه ربات گروه)
+            if do_force_join:
+                fj_result = await detect_and_handle_bot_forced_join(uc, dlg.chat.id, original_text=text)
+                if fj_result.get("forced_join_detected") and fj_result.get("resent"):
+                    force_joined += 1
             # فاصله تصادفی بین گروه‌ها
             await asyncio.sleep(random.uniform(1.5, 4))
 
