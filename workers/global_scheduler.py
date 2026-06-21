@@ -105,21 +105,28 @@ async def _run_for_target(target):
         try:
             await uc.start()
 
-            allowed_chats = None
+            exclude_chats = None
             if target == "groups" and gtag not in ("ALL", ""):
                 if gtag == "NOTAG":
+                    # گروه‌هایی که برچسب غیرخالی دارن رو exclude می‌کنیم
                     rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s "
-                             "AND (tag_name='' OR tag_name IS NULL)", (ADMIN_ID, acc_id))
+                             "AND tag_name<>'' AND tag_name IS NOT NULL", (ADMIN_ID, acc_id))
+                    exclude_chats = set(r[0] for r in rows)
+                    allowed_chats = None
                 else:
                     rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
                              (ADMIN_ID, acc_id, gtag))
-                allowed_chats = set(r[0] for r in rows)
+                    allowed_chats = set(r[0] for r in rows)
+            else:
+                allowed_chats = None
 
             dialogs = []
             async for dlg in uc.get_dialogs():
                 if dlg.chat.type not in chat_type_filter:
                     continue
                 if allowed_chats is not None and dlg.chat.id not in allowed_chats:
+                    continue
+                if exclude_chats is not None and dlg.chat.id in exclude_chats:
                     continue
                 dialogs.append(dlg)
 
