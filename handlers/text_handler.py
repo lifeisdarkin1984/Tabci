@@ -606,16 +606,35 @@ def get_filtered_accounts(tag_filter):
                  (ADMIN_ID, tag_filter))
 
 def get_filtered_chat_ids(acc_id, tag_filter):
-    """chat_id های فیلترشده برای یک اکانت"""
+    """
+    chat_id های فیلترشده برای یک اکانت.
+    خروجی: (mode, set)
+      mode='all'      → فیلتری نیست، همه گروه‌ها
+      mode='include'  → فقط chat_id های داخل set
+      mode='exclude'  → همه گروه‌ها به‌جز chat_id های داخل set (برای NOTAG)
+    """
     if tag_filter == "ALL":
-        return None  # None یعنی همه گروه‌ها (بدون فیلتر)
+        return ("all", None)
     elif tag_filter == "NOTAG":
+        # گروه‌هایی که برچسب غیرخالی دارن رو exclude می‌کنیم؛ بقیه (چه ثبت نشده چه خالی) NOTAG حساب میشن
         rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s "
-                 "AND (tag_name='' OR tag_name IS NULL)", (ADMIN_ID, acc_id))
+                 "AND tag_name<>'' AND tag_name IS NOT NULL", (ADMIN_ID, acc_id))
+        return ("exclude", set(r[0] for r in rows))
     else:
         rows = q("SELECT chat_id FROM group_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
                  (ADMIN_ID, acc_id, tag_filter))
-    return set(r[0] for r in rows) if rows else set()
+        return ("include", set(r[0] for r in rows))
+
+
+def _chat_allowed(chat_id, filter_result):
+    mode, ids = filter_result
+    if mode == "all":
+        return True
+    if mode == "include":
+        return chat_id in ids
+    if mode == "exclude":
+        return chat_id not in ids
+    return True
 
 
 async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group_tag_filter="ALL"):
@@ -632,7 +651,7 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
     do_force_join = row_fj[0][0] if row_fj else 0
 
     # فیلتر گروه‌ها بر اساس برچسب
-    allowed_chats = get_filtered_chat_ids(acc_id, group_tag_filter)
+    filter_result = get_filtered_chat_ids(acc_id, group_tag_filter)
 
     ok = fail = limited = force_joined = left = 0
 
@@ -650,7 +669,7 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
             if dlg.chat.type not in (en.ChatType.GROUP, en.ChatType.SUPERGROUP):
                 continue
             # اعمال فیلتر برچسب
-            if allowed_chats is not None and dlg.chat.id not in allowed_chats:
+            if not _chat_allowed(dlg.chat.id, filter_result):
                 continue
             dialogs.append(dlg)
     except Exception as e:
