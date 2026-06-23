@@ -415,6 +415,31 @@ def register(app):
                 clear_step(ADMIN_ID)
 
             # ── انتخاب برچسب برای جوین همگانی ──
+            elif d == "gjoin_nodup" or d == "gjoin_all":
+                import json
+                raw = get_step_data(ADMIN_ID)
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    await cb.answer("❌ خطا در بازیابی داده.", show_alert=True)
+                    return
+                if d == "gjoin_nodup":
+                    chosen_links = data.get("new", [])
+                else:
+                    chosen_links = data.get("all", [])
+                if not chosen_links:
+                    await cb.answer("❌ هیچ لینکی برای جوین وجود ندارد.", show_alert=True)
+                    clear_step(ADMIN_ID)
+                    return
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                from keyboards import tag_select_kb
+                set_step(ADMIN_ID, "g_join_tag", "\n".join(chosen_links))
+                await cb.message.edit_text(
+                    f"✅ {len(chosen_links)} لینک انتخاب شد.\nبرچسب گروه‌ها را انتخاب کنید:",
+                    reply_markup=tag_select_kb(tag_list, "gjointag", show_all=False)
+                )
+
             elif d.startswith("gjointag_tag_"):
                 tag_name = d[13:]
                 chosen_tag = "" if tag_name == "NOTAG" else tag_name

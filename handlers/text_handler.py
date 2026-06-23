@@ -1,4 +1,4 @@
-import asyncio, random, re, time
+import asyncio, random, re, time, hashlib
 from pyrogram import Client, filters
 from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
     InviteHashExpired, InviteHashInvalid, ChannelsTooMuch,
@@ -310,14 +310,47 @@ def register(app):
 
         elif step == "g_join":
             links = [l.strip() for l in text.splitlines() if l.strip()]
-            set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
-            tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
-            tag_list = [t[0] for t in tags]
-            from keyboards import tag_select_kb
-            await message.reply(
-                f"✅ {len(links)} لینک دریافت شد.\nبرچسب گروه‌ها را انتخاب کنید:",
-                reply_markup=tag_select_kb(tag_list, "gjointag", show_all=False)
-            )
+            if not links:
+                await message.reply("❌ لینکی وارد نشد.")
+                return
+
+            # بررسی تکراری بودن لینک‌ها با جدول used_links
+            new_links, dup_links = _check_duplicate_links(links)
+
+            if dup_links:
+                # ذخیره هر دو لیست در step و نمایش گزارش
+                import json
+                set_step(ADMIN_ID, "g_join_dup_check", json.dumps({
+                    "all": links,
+                    "new": new_links,
+                    "dup": dup_links
+                }))
+                from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                await message.reply(
+                    f"📋 **{len(links)} لینک دریافت شد**\n"
+                    f"✅ جدید: {len(new_links)} لینک\n"
+                    f"🔄 تکراری: {len(dup_links)} لینک (قبلاً استفاده شده)",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            f"❌ حذف تکراری‌ها و جوین با {len(new_links)} لینک",
+                            callback_data="gjoin_nodup"
+                        )],
+                        [InlineKeyboardButton(
+                            f"✅ جوین با همه {len(links)} لینک",
+                            callback_data="gjoin_all"
+                        )]
+                    ])
+                )
+            else:
+                # هیچ تکراری نیست، مستقیم بره انتخاب برچسب
+                set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                from keyboards import tag_select_kb
+                await message.reply(
+                    f"✅ {len(links)} لینک دریافت شد.\nبرچسب گروه‌ها را انتخاب کنید:",
+                    reply_markup=tag_select_kb(tag_list, "gjointag", show_all=False)
+                )
 
         elif step.startswith("rr_badd_"):
             acc_id = step[8:]
@@ -616,6 +649,9 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
             await asyncio.sleep(delay)
 
     await uc.stop()
+    # ذخیره لینک‌های موفق در used_links تا دفعه بعد تکراری شناخته بشن
+    if ok_links:
+        _save_used_links(ok_links)
     tag_lbl = f" — 🏷 {tag}" if tag else ""
     report = (f"✅ عملیات عضویت تمام شد{tag_lbl}\n👤 {acc_display}\n"
               f"موفق: {len(ok_links)}\nناموفق: {len(fail_links)}")
@@ -808,3 +844,59 @@ async def _global_profile(message, action, value):
         reply_markup=global_kb()
     )
     clear_step(ADMIN_ID)
+
+
+# ─── توابع کمکی تشخیص لینک تکراری ────────────────────────────
+
+def _normalize_link(link: str) -> str:
+    """نرمال‌سازی لینک: lowercase + حذف پارامترهای اضافه مثل ?start=..."""
+    link = link.strip().lower()
+    link = link.split("?")[0]   # حذف query string
+    link = link.rstrip("/")     # حذف slash انتهایی
+    return link
+
+
+def _link_hash(link: str) -> str:
+    """تبدیل لینک نرمال‌شده به hash برای ذخیره در دیتابیس"""
+    return hashlib.sha256(_normalize_link(link).encode()).hexdigest()
+
+
+def _check_duplicate_links(links: list) -> tuple:
+    """
+    جداسازی لینک‌های جدید از تکراری.
+    خروجی: (new_links, dup_links)
+    """
+    if not links:
+        return [], []
+
+    hashes = [_link_hash(l) for l in links]
+    # کوئری یکجا برای همه hash‌ها
+    placeholders = ",".join(["%s"] * len(hashes))
+    existing = q(
+        f"SELECT link_hash FROM used_links WHERE admin_id=%s AND link_hash IN ({placeholders})",
+        (ADMIN_ID, *hashes)
+    )
+    existing_hashes = set(r[0] for r in existing) if existing else set()
+
+    new_links, dup_links = [], []
+    for link, h in zip(links, hashes):
+        if h in existing_hashes:
+            dup_links.append(link)
+        else:
+            new_links.append(link)
+
+    return new_links, dup_links
+
+
+def _save_used_links(links: list):
+    """ذخیره لینک‌ها در جدول used_links (تکراری‌ها نادیده گرفته می‌شن)"""
+    for link in links:
+        norm = _normalize_link(link)
+        h = _link_hash(link)
+        try:
+            u(
+                "INSERT IGNORE INTO used_links (admin_id, link_hash, link_text) VALUES (%s,%s,%s)",
+                (ADMIN_ID, h, norm[:500])
+            )
+        except Exception as e:
+            print(f"[UsedLinks] خطا در ذخیره: {e}")
