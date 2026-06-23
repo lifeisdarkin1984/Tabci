@@ -165,6 +165,14 @@ def init_db():
             file_type VARCHAR(30) DEFAULT '',
             UNIQUE KEY uniq_slot (admin_id, target, slot)
         )""",
+        """CREATE TABLE IF NOT EXISTS used_links (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            link_hash VARCHAR(64) NOT NULL,
+            link_text VARCHAR(500) NOT NULL,
+            used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_link (admin_id, link_hash)
+        )""",
     ]
     for s in stmts:
         try:
