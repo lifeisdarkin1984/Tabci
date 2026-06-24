@@ -433,7 +433,6 @@ def register(app):
                     return
                 tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
-                from keyboards import tag_select_kb
                 set_step(ADMIN_ID, "g_join_tag", "\n".join(chosen_links))
                 await cb.message.edit_text(
                     f"✅ {len(chosen_links)} لینک انتخاب شد.\nبرچسب گروه‌ها را انتخاب کنید:",
