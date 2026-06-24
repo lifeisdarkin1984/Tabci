@@ -309,6 +309,10 @@ def register(app):
             )
 
         elif step == "g_join":
+            import json
+            from keyboards import tag_select_kb
+            from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
             links = [l.strip() for l in text.splitlines() if l.strip()]
             if not links:
                 await message.reply("❌ لینکی وارد نشد.")
@@ -318,14 +322,11 @@ def register(app):
             new_links, dup_links = _check_duplicate_links(links)
 
             if dup_links:
-                # ذخیره هر دو لیست در step و نمایش گزارش
-                import json
                 set_step(ADMIN_ID, "g_join_dup_check", json.dumps({
                     "all": links,
                     "new": new_links,
                     "dup": dup_links
                 }))
-                from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
                 await message.reply(
                     f"📋 **{len(links)} لینک دریافت شد**\n"
                     f"✅ جدید: {len(new_links)} لینک\n"
@@ -342,11 +343,9 @@ def register(app):
                     ])
                 )
             else:
-                # هیچ تکراری نیست، مستقیم بره انتخاب برچسب
                 set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
                 tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
-                from keyboards import tag_select_kb
                 await message.reply(
                     f"✅ {len(links)} لینک دریافت شد.\nبرچسب گروه‌ها را انتخاب کنید:",
                     reply_markup=tag_select_kb(tag_list, "gjointag", show_all=False)
