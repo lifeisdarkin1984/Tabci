@@ -1,4 +1,4 @@
-import asyncio, random, re, time, hashlib
+import asyncio, random, re, time, hashlib, json
 from pyrogram import Client, filters
 from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
     InviteHashExpired, InviteHashInvalid, ChannelsTooMuch,
@@ -9,7 +9,8 @@ from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
                    clear_step, get_user_client, save_account, is_stopped, set_stop,
                    detect_and_handle_bot_forced_join)
-from keyboards import manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb, react_rand_kb, reply_banner_list_kb
+from keyboards import manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb, react_rand_kb, reply_banner_list_kb, tag_select_kb
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from handlers.login import send_code, sign_in
 
 def register(app):
@@ -200,7 +201,6 @@ def register(app):
             set_step(ADMIN_ID, f"join_tag_{acc_id}", "\n".join(links))
             tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
             tag_list = [t[0] for t in tags]
-            from keyboards import tag_select_kb
             await message.reply(
                 f"✅ **{len(links)} لینک دریافت شد**\n\nبرچسب گروه‌ها را انتخاب کنید:",
                 reply_markup=tag_select_kb(tag_list, f"jointag_{acc_id}", show_all=False)
@@ -309,9 +309,6 @@ def register(app):
             )
 
         elif step == "g_join":
-            import json
-            from keyboards import tag_select_kb
-            from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             links = [l.strip() for l in text.splitlines() if l.strip()]
             if not links:
