@@ -9,7 +9,9 @@ from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
                    clear_step, get_user_client, save_account, is_stopped, set_stop,
                    detect_and_handle_bot_forced_join)
-from keyboards import manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb, react_rand_kb, reply_banner_list_kb, tag_select_kb
+from keyboards import (manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb,
+                       react_rand_kb, reply_banner_list_kb, tag_select_kb,
+                       main_menu_kb, global_sch_panel_kb, tags_list_kb)
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from handlers.login import send_code, sign_in
 
@@ -236,7 +238,6 @@ def register(app):
             u("INSERT INTO global_scheduler (admin_id,target,interval_minutes) "
               "VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE interval_minutes=%s",
               (ADMIN_ID, target, int(text), int(text)))
-            from keyboards import global_sch_panel_kb
             row = q("SELECT is_active,group_tag_filter,acc_tag_filter,max_rounds,current_round "
                     "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
             active = row[0][0] if row else 0
@@ -257,7 +258,6 @@ def register(app):
             u("INSERT INTO global_scheduler (admin_id,target,max_rounds,current_round) "
               "VALUES(%s,%s,%s,0) ON DUPLICATE KEY UPDATE max_rounds=%s, current_round=0",
               (ADMIN_ID, target, rounds, rounds))
-            from keyboards import global_sch_panel_kb
             row = q("SELECT is_active,group_tag_filter,acc_tag_filter,max_rounds,current_round "
                     "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
             active = row[0][0] if row else 0
@@ -287,7 +287,6 @@ def register(app):
                 u("INSERT INTO tags (admin_id,name) VALUES(%s,%s)", (ADMIN_ID, tag_name))
                 tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
-                from keyboards import tags_list_kb
                 await message.reply(f"✅ برچسب «{tag_name}» ساخته شد.",
                                      reply_markup=tags_list_kb(tag_list, context))
             except Exception:
@@ -449,7 +448,6 @@ async def _handle_login_result(message, result, err, phone):
     me, ss = result
     save_account(me, ss, phone)
     cnt = q("SELECT COUNT(*) FROM accounts WHERE admin_id=%s", (ADMIN_ID,))[0][0]
-    from keyboards import main_menu_kb
     await message.reply(
         f"✅ **اکانت اضافه شد!**\n\n"
         f"👤 {me.first_name or ''} {me.last_name or ''}\n"
