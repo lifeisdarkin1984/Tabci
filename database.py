@@ -203,7 +203,6 @@ def init_db():
         ("global_scheduler", "acc_tag_filter", "VARCHAR(100) DEFAULT 'ALL'"),
         ("global_scheduler", "max_rounds", "INT DEFAULT 0"),
         ("global_scheduler", "current_round", "INT DEFAULT 0"),
-        ("accounts", "last_sys_msg_id", "BIGINT DEFAULT 0"),
     ]
     for table, col, definition in new_columns:
         if not column_exists(table, col):
