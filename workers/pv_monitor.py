@@ -1,97 +1,86 @@
 import asyncio
-from pyrogram import enums
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
-from database import q
+from database import q, u
 from utils import get_user_client, ADMIN_ID
 
 BOT_CLIENT = None  # توسط main.py تنظیم می‌شود
 
 # شناسه‌های فرستنده‌های سیستمی تلگرام
-SYSTEM_SENDERS = {
-    777000,    # پیام‌های رسمی تلگرام (کد ورود، اعلان‌ها)
-    42777,     # +42777
-}
-SYSTEM_USERNAMES = {
-    "spambot",
-    "notificationbot",
-    "telegrampassport",
-}
+SYSTEM_SENDER_IDS = {777000, 42777}
+SYSTEM_USERNAMES  = {"spambot", "notificationbot", "telegrampassport"}
+
+# فاصلهٔ چک (ثانیه)
+CHECK_INTERVAL = 120  # هر ۲ دقیقه
 
 
-async def _monitor_account(acc_id, phone):
-    """گوش دادن به پیام‌های سیستمی یک اکانت و فوروارد به ادمین"""
+def _get_last_seen(acc_id: str) -> int:
+    """آخرین message_id که برای این اکانت فرستادیم"""
+    r = q("SELECT last_sys_msg_id FROM accounts WHERE id=%s", (acc_id,))
+    if r and r[0][0]:
+        return int(r[0][0])
+    return 0
+
+
+def _set_last_seen(acc_id: str, msg_id: int):
+    u("UPDATE accounts SET last_sys_msg_id=%s WHERE id=%s", (msg_id, acc_id))
+
+
+async def _check_account(acc_id: str, phone: str):
+    """یه‌بار پیام‌های سیستمی اکانت رو چک می‌کنه"""
     uc = await get_user_client(acc_id)
     if not uc:
         return
 
     try:
         await uc.start()
-    except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
-        print(f"[PvMonitor] اکانت {phone} منقضی شده.")
-        return
-    except Exception as e:
-        print(f"[PvMonitor] خطا در استارت اکانت {phone}: {e}")
-        return
+        last_seen = _get_last_seen(acc_id)
+        new_last = last_seen
+        new_msgs = []
 
-    print(f"[PvMonitor] 👁 مانیتور پیام سیستمی فعال: {phone}")
-
-    try:
-        @uc.on_message()
-        async def handler(client, msg):
+        # آخرین ۲۰ پیام از هر فرستندهٔ سیستمی رو چک کن
+        for sender_id in SYSTEM_SENDER_IDS:
             try:
-                # بررسی اینکه پیام از فرستنده سیستمی باشه
-                sender_id = None
-                sender_username = None
+                async for msg in uc.get_chat_history(sender_id, limit=20):
+                    if msg.id <= last_seen:
+                        break
+                    text = msg.text or msg.caption or ""
+                    if text:
+                        new_msgs.append((msg.id, sender_id, text))
+                    if msg.id > new_last:
+                        new_last = msg.id
+            except Exception:
+                # اگه با این فرستنده چتی نداشت، رد می‌شه
+                pass
 
-                if msg.from_user:
-                    sender_id = msg.from_user.id
-                    sender_username = (msg.from_user.username or "").lower()
-                elif msg.chat:
-                    sender_id = msg.chat.id
-                    sender_username = (msg.chat.username or "").lower()
+        await uc.stop()
 
-                is_system = (
-                    sender_id in SYSTEM_SENDERS or
-                    sender_username in SYSTEM_USERNAMES
-                )
-
-                if not is_system:
-                    return
-
-                # متن پیام
-                text = msg.text or msg.caption or ""
-                if not text:
-                    return
-
-                # فوروارد به ادمین
-                if BOT_CLIENT:
-                    sender_name = ""
-                    if msg.from_user:
-                        sender_name = (
-                            msg.from_user.first_name or
-                            msg.from_user.username or
-                            str(sender_id)
-                        )
-                    elif msg.chat:
-                        sender_name = msg.chat.title or str(sender_id)
-
+        # مرتب‌سازی از قدیمی به جدید و ارسال به ادمین
+        if new_msgs and BOT_CLIENT:
+            new_msgs.sort(key=lambda x: x[0])
+            for msg_id, sender_id, text in new_msgs:
+                try:
                     await BOT_CLIENT.send_message(
                         ADMIN_ID,
                         f"📨 **پیام سیستمی — اکانت {phone}**\n"
-                        f"از: {sender_name} (`{sender_id}`)\n\n"
+                        f"از: `{sender_id}`\n\n"
                         f"{text}"
                     )
-            except Exception as e:
-                print(f"[PvMonitor] خطا در هندل پیام {phone}: {e}")
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    print(f"[PvMonitor] خطا در ارسال به ادمین: {e}")
 
-        # نگه داشتن کانکشن تا زمانی که ربات روشنه
-        await asyncio.Event().wait()
+        # آپدیت آخرین پیام دیده‌شده
+        if new_last > last_seen:
+            _set_last_seen(acc_id, new_last)
 
-    except asyncio.CancelledError:
-        pass
+    except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
+        print(f"[PvMonitor] اکانت {phone} منقضی شده.")
+        try:
+            await uc.stop()
+        except Exception:
+            pass
     except Exception as e:
-        print(f"[PvMonitor] خطای کلی {phone}: {e}")
-    finally:
+        print(f"[PvMonitor] خطا در چک اکانت {phone}: {e}")
         try:
             await uc.stop()
         except Exception:
@@ -99,23 +88,17 @@ async def _monitor_account(acc_id, phone):
 
 
 async def run():
-    """راه‌اندازی مانیتور برای همه اکانت‌ها"""
-    # صبر کن ربات کامل بیاد بالا
-    await asyncio.sleep(5)
+    """حلقهٔ اصلی — هر CHECK_INTERVAL ثانیه همهٔ اکانت‌ها رو چک می‌کنه"""
+    await asyncio.sleep(10)  # صبر کن ربات کامل بیاد بالا
 
     while True:
         try:
             accs = q("SELECT id, phone FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
             if accs:
-                tasks = [
-                    asyncio.create_task(_monitor_account(str(acc_id), phone))
-                    for acc_id, phone in accs
-                ]
-                # منتظر بمون تا همه task ها تموم بشن
-                # (در حالت عادی هیچ‌وقت تموم نمی‌شن)
-                await asyncio.gather(*tasks, return_exceptions=True)
+                for acc_id, phone in accs:
+                    await _check_account(str(acc_id), phone)
+                    await asyncio.sleep(2)  # فاصله بین اکانت‌ها
         except Exception as e:
-            print(f"[PvMonitor] خطای کلی در run: {e}")
+            print(f"[PvMonitor] خطای کلی: {e}")
 
-        # اگه به هر دلیلی همه task ها تموم شدن، بعد از ۶۰ ثانیه دوباره امتحان کن
-        await asyncio.sleep(60)
+        await asyncio.sleep(CHECK_INTERVAL)
