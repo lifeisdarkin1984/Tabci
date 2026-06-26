@@ -173,6 +173,21 @@ def init_db():
             used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_link (admin_id, link_hash)
         )""",
+        """CREATE TABLE IF NOT EXISTS pv_links (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            link VARCHAR(500) NOT NULL,
+            link_hash VARCHAR(64) NOT NULL,
+            found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_pv_link (admin_id, link_hash)
+        )""",
+        """CREATE TABLE IF NOT EXISTS pv_join_settings (
+            admin_id BIGINT PRIMARY KEY,
+            auto_scan TINYINT DEFAULT 0,
+            scan_interval_hours INT DEFAULT 6,
+            daily_limit INT DEFAULT 20,
+            last_scan TIMESTAMP NULL
+        )""",
     ]
     for s in stmts:
         try:

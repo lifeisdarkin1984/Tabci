@@ -71,6 +71,7 @@ def global_kb():
         [InlineKeyboardButton("📊 آمار اکانت‌ها",   callback_data="g_stats"),
          InlineKeyboardButton("♻️ وضعیت اکانت‌ها", callback_data="g_status")],
         [InlineKeyboardButton("🏷 مدیریت برچسب‌ها", callback_data="tags_menu")],
+        [InlineKeyboardButton("📥 جوین از پیوی‌ها", callback_data="g_pvjoin")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ])
 
@@ -248,6 +249,27 @@ def confirm_kb(yes, no):
 
 def back_kb(cb):
     return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data=cb)]])
+
+# ─── جوین از پیوی‌ها ─────────────────────────────────────────
+def pv_join_kb(link_count, last_scan):
+    last = last_scan.strftime("%H:%M - %y/%m/%d") if last_scan else "هرگز"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🔍 اسکن الان ({last})", callback_data="g_pvjoin_scan")],
+        [InlineKeyboardButton(f"📋 نمایش لینک‌ها ({link_count} عدد)", callback_data="g_pvjoin_show")],
+        [InlineKeyboardButton("✅ جوین با لینک‌های یافت‌شده", callback_data="g_pvjoin_join")],
+        [InlineKeyboardButton("🗑 پاک کردن لیست", callback_data="g_pvjoin_clear")],
+        [InlineKeyboardButton("⚙️ تنظیمات اسکن خودکار", callback_data="g_pvjoin_settings")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
+    ])
+
+def pv_join_settings_kb(auto_scan, interval_hours, daily_limit):
+    auto_lbl = "🟢 فعال" if auto_scan else "🔴 غیرفعال"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"اسکن خودکار: {auto_lbl}", callback_data="g_pvjoin_tog_auto")],
+        [InlineKeyboardButton(f"⏰ فاصله اسکن: {interval_hours} ساعت", callback_data="g_pvjoin_set_interval")],
+        [InlineKeyboardButton(f"📊 سقف روزانه: {daily_limit} لینک", callback_data="g_pvjoin_set_limit")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="g_pvjoin")],
+    ])
 
 # ─── مدیریت برچسب‌ها ────────────────────────────────────────
 def tags_menu_kb():
