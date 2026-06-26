@@ -156,5 +156,23 @@ async def run():
 
         except Exception as e:
             print(f"[Secretary] خطای کلی: {e}")
+
+        # ── اسکن خودکار پیوی‌ها ──
+        try:
+            pv_settings = q(
+                "SELECT auto_scan, scan_interval_hours, last_scan "
+                "FROM pv_join_settings WHERE admin_id=%s",
+                (ADMIN_ID,)
+            )
+            if pv_settings and pv_settings[0][0]:
+                from datetime import datetime, timedelta
+                _, interval_hours, last_scan = pv_settings[0]
+                now = datetime.utcnow()
+                if last_scan is None or (now - last_scan) >= timedelta(hours=interval_hours):
+                    from handlers.callbacks import _scan_pvs_for_links
+                    await _scan_pvs_for_links(BOT_CLIENT)
+        except Exception as e:
+            print(f"[Secretary] خطا در اسکن خودکار پیوی‌ها: {e}")
+
         await asyncio.sleep(1800)
 
