@@ -702,7 +702,7 @@ def register(app):
                 back = "menu_global" if acc_id == "global" else None
                 await cb.message.edit_reply_markup(react_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
-
+            elif d.startswith("rr_time_"):
                 acc_id = d[8:]
                 set_step(ADMIN_ID, f"rr_int_{acc_id}")
                 await cb.message.edit_text("⏱ فاصله ریپلای (دقیقه):")
@@ -1136,10 +1136,15 @@ def register(app):
 
             elif d.startswith("gbn_back_"):
                 target = d[9:]
-                row = q("SELECT is_active, interval_minutes FROM global_scheduler "
+                row = q("SELECT is_active, interval_minutes, group_tag_filter, acc_tag_filter, "
+                        "max_rounds, current_round FROM global_scheduler "
                         "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 60
+                gtag = (row[0][2] if row else None) or "ALL"
+                atag = (row[0][3] if row else None) or "ALL"
+                max_r = row[0][4] if row else 0
+                cur_r = row[0][5] if row else 0
                 title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
                 bnrs = q("SELECT slot, text, file_id FROM global_banners "
                          "WHERE admin_id=%s AND target=%s ORDER BY slot", (ADMIN_ID, target))
@@ -1153,7 +1158,8 @@ def register(app):
                     else:
                         txt += f"💬 پیام {slot}: تنظیم نشده\n"
                 txt += "\nهر دوره (هر X دقیقه) یکی از این پیام‌ها به‌ترتیب شماره ارسال می‌شود."
-                await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(target, active))
+                await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(
+                    target, active, gtag=gtag, atag=atag, max_rounds=max_r, current_round=cur_r))
 
             elif d == "g_fwdgrp":
                 set_step(ADMIN_ID, "g_fwdgrp"); await cb.message.edit_text("📤 لینک پیام:", reply_markup=back_kb("menu_global"))
@@ -1268,28 +1274,31 @@ def register(app):
                 await cb.message.edit_reply_markup(global_sec_kb(bool(new)))
 
             elif d == "g_rr":
-                row = q("SELECT is_active,interval_minutes,message_text FROM reply_rand WHERE account_id='global'")
+                row = q("SELECT is_active,interval_minutes,group_tag_filter,acc_tag_filter FROM reply_rand WHERE account_id='global' AND admin_id=%s", (ADMIN_ID,))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 30
-                msg = (row[0][2] if row else "") or "تنظیم نشده"
+                gtag = (row[0][2] if row else None) or "ALL"
+                atag = (row[0][3] if row else None) or "ALL"
                 await cb.message.edit_text(
                     f"↩️ **ریپلای رندم همگانی**\n\n"
                     f"این تنظیم برای **همه اکانت‌ها** یکسان اعمال می‌شود؛ "
                     f"هر اکانت مستقل با همین متن و زمان ریپلای می‌زند.\n\n"
-                    f"پیام: {msg}\nفاصله: {interval} دقیقه\nوضعیت: {'✅' if active else '❌'}",
-                    reply_markup=reply_rand_kb("global", active, back_to="menu_global")
+                    f"فاصله: {interval} دقیقه\nوضعیت: {'✅' if active else '❌'}",
+                    reply_markup=reply_rand_kb("global", active, back_to="menu_global", group_tag=gtag, acc_tag=atag)
                 )
 
             elif d == "g_rc":
-                row = q("SELECT is_active,interval_minutes FROM react_rand WHERE account_id='global'")
+                row = q("SELECT is_active,interval_minutes,group_tag_filter,acc_tag_filter FROM react_rand WHERE account_id='global' AND admin_id=%s", (ADMIN_ID,))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 30
+                gtag = (row[0][2] if row else None) or "ALL"
+                atag = (row[0][3] if row else None) or "ALL"
                 await cb.message.edit_text(
                     f"😀 **ری‌اکت رندم همگانی**\n\n"
                     f"این تنظیم برای **همه اکانت‌ها** یکسان اعمال می‌شود؛ "
                     f"هر اکانت مستقل ری‌اکت می‌زند.\n\n"
                     f"فاصله: {interval} دقیقه\nوضعیت: {'✅' if active else '❌'}",
-                    reply_markup=react_rand_kb("global", active, back_to="menu_global")
+                    reply_markup=react_rand_kb("global", active, back_to="menu_global", group_tag=gtag, acc_tag=atag)
                 )
 
             # ══ جوین از پیوی‌ها ══
