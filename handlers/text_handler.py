@@ -300,6 +300,58 @@ def register(app):
                 reply_markup=confirm_kb("g_sgrp_go", "menu_global")
             )
 
+        elif step == "g_pvjoin_interval":
+            if not text.isdigit() or not (1 <= int(text) <= 24):
+                await message.reply("❌ عدد بین ۱ تا ۲۴ وارد کنید.")
+                return
+            val = int(text)
+            u(
+                "INSERT INTO pv_join_settings (admin_id, scan_interval_hours) VALUES (%s, %s) "
+                "ON DUPLICATE KEY UPDATE scan_interval_hours=%s",
+                (ADMIN_ID, val, val)
+            )
+            st_row = q(
+                "SELECT auto_scan, scan_interval_hours, daily_limit "
+                "FROM pv_join_settings WHERE admin_id=%s",
+                (ADMIN_ID,)
+            )
+            from keyboards import pv_join_settings_kb
+            await message.reply(
+                f"✅ فاصله اسکن خودکار: {val} ساعت",
+                reply_markup=pv_join_settings_kb(
+                    st_row[0][0] if st_row else 0,
+                    st_row[0][1] if st_row else val,
+                    st_row[0][2] if st_row else 20
+                )
+            )
+            clear_step(ADMIN_ID)
+
+        elif step == "g_pvjoin_limit":
+            if not text.isdigit() or not (1 <= int(text) <= 100):
+                await message.reply("❌ عدد بین ۱ تا ۱۰۰ وارد کنید.")
+                return
+            val = int(text)
+            u(
+                "INSERT INTO pv_join_settings (admin_id, daily_limit) VALUES (%s, %s) "
+                "ON DUPLICATE KEY UPDATE daily_limit=%s",
+                (ADMIN_ID, val, val)
+            )
+            st_row = q(
+                "SELECT auto_scan, scan_interval_hours, daily_limit "
+                "FROM pv_join_settings WHERE admin_id=%s",
+                (ADMIN_ID,)
+            )
+            from keyboards import pv_join_settings_kb
+            await message.reply(
+                f"✅ سقف روزانه جوین: {val} لینک",
+                reply_markup=pv_join_settings_kb(
+                    st_row[0][0] if st_row else 0,
+                    st_row[0][1] if st_row else 6,
+                    st_row[0][2] if st_row else val
+                )
+            )
+            clear_step(ADMIN_ID)
+
         elif step == "g_spv":
             set_step(ADMIN_ID, "g_spv_confirm", text)
             await message.reply(

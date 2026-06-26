@@ -1292,6 +1292,103 @@ def register(app):
                     reply_markup=react_rand_kb("global", active, back_to="menu_global")
                 )
 
+            # ══ جوین از پیوی‌ها ══
+            elif d == "g_pvjoin":
+                cnt_row = q("SELECT COUNT(*) FROM pv_links WHERE admin_id=%s", (ADMIN_ID,))
+                link_count = cnt_row[0][0] if cnt_row else 0
+                st_row = q("SELECT last_scan FROM pv_join_settings WHERE admin_id=%s", (ADMIN_ID,))
+                last_scan = st_row[0][0] if st_row else None
+                await cb.message.edit_text(
+                    "📥 **جوین از پیوی‌ها**\n\n"
+                    "اکانت‌ها پیوی‌هایشان را اسکن می‌کنند و لینک‌های تلگرامی استخراج می‌شوند.",
+                    reply_markup=pv_join_kb(link_count, last_scan)
+                )
+
+            elif d == "g_pvjoin_scan":
+                await cb.message.edit_text("🔍 در حال اسکن پیوی‌ها...\nلطفاً صبر کنید.")
+                asyncio.create_task(_scan_pvs_for_links(cb._client))
+
+            elif d == "g_pvjoin_show":
+                rows = q("SELECT link FROM pv_links WHERE admin_id=%s ORDER BY found_at DESC", (ADMIN_ID,))
+                if not rows:
+                    await cb.answer("❌ لینکی یافت نشده. ابتدا اسکن کنید.", show_alert=True)
+                else:
+                    out = "\n".join(r[0] for r in rows)
+                    chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
+                    for chunk in chunks:
+                        await cb._client.send_message(ADMIN_ID, chunk)
+                    await cb.answer(f"✅ {len(rows)} لینک ارسال شد", show_alert=True)
+
+            elif d == "g_pvjoin_join":
+                rows = q("SELECT link FROM pv_links WHERE admin_id=%s ORDER BY found_at DESC", (ADMIN_ID,))
+                if not rows:
+                    await cb.answer("❌ لینکی یافت نشده. ابتدا اسکن کنید.", show_alert=True)
+                else:
+                    links = [r[0] for r in rows]
+                    set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
+                    tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                    tag_list = [t[0] for t in tags]
+                    await cb.message.edit_text(
+                        f"✅ **{len(links)} لینک از پیوی‌ها آماده جوین**\n\nبرچسب گروه‌ها را انتخاب کنید:",
+                        reply_markup=tag_select_kb(tag_list, "gjointag", show_all=False)
+                    )
+
+            elif d == "g_pvjoin_clear":
+                u("DELETE FROM pv_links WHERE admin_id=%s", (ADMIN_ID,))
+                await cb.answer("✅ لیست لینک‌ها پاک شد", show_alert=True)
+                await cb.message.edit_text(
+                    "📥 **جوین از پیوی‌ها**\n\n"
+                    "اکانت‌ها پیوی‌هایشان را اسکن می‌کنند و لینک‌های تلگرامی استخراج می‌شوند.",
+                    reply_markup=pv_join_kb(0, None)
+                )
+
+            elif d == "g_pvjoin_settings":
+                st_row = q(
+                    "SELECT auto_scan, scan_interval_hours, daily_limit "
+                    "FROM pv_join_settings WHERE admin_id=%s",
+                    (ADMIN_ID,)
+                )
+                auto_scan = st_row[0][0] if st_row else 0
+                interval_hours = st_row[0][1] if st_row else 6
+                daily_limit = st_row[0][2] if st_row else 20
+                await cb.message.edit_text(
+                    "⚙️ **تنظیمات اسکن خودکار پیوی‌ها**",
+                    reply_markup=pv_join_settings_kb(auto_scan, interval_hours, daily_limit)
+                )
+
+            elif d == "g_pvjoin_tog_auto":
+                st_row = q("SELECT auto_scan FROM pv_join_settings WHERE admin_id=%s", (ADMIN_ID,))
+                new = 0 if (st_row and st_row[0][0]) else 1
+                u(
+                    "INSERT INTO pv_join_settings (admin_id, auto_scan) VALUES (%s, %s) "
+                    "ON DUPLICATE KEY UPDATE auto_scan=%s",
+                    (ADMIN_ID, new, new)
+                )
+                await cb.answer(f"اسکن خودکار {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
+                st_row2 = q(
+                    "SELECT auto_scan, scan_interval_hours, daily_limit "
+                    "FROM pv_join_settings WHERE admin_id=%s",
+                    (ADMIN_ID,)
+                )
+                auto_scan = st_row2[0][0] if st_row2 else new
+                interval_hours = st_row2[0][1] if st_row2 else 6
+                daily_limit = st_row2[0][2] if st_row2 else 20
+                await cb.message.edit_reply_markup(pv_join_settings_kb(auto_scan, interval_hours, daily_limit))
+
+            elif d == "g_pvjoin_set_interval":
+                set_step(ADMIN_ID, "g_pvjoin_interval")
+                await cb.message.edit_text(
+                    "⏰ **فاصله اسکن خودکار**\n\nعدد ساعت را وارد کنید (۱ تا ۲۴):",
+                    reply_markup=back_kb("g_pvjoin_settings")
+                )
+
+            elif d == "g_pvjoin_set_limit":
+                set_step(ADMIN_ID, "g_pvjoin_limit")
+                await cb.message.edit_text(
+                    "📊 **سقف روزانه جوین**\n\nتعداد لینک در روز را وارد کنید (۱ تا ۱۰۰):",
+                    reply_markup=back_kb("g_pvjoin_settings")
+                )
+
 
         except Exception as e:
             print(f"[CB ERROR] {d}: {e}")
@@ -1393,3 +1490,85 @@ async def _send_to_groups_task(bot_client, acc_id, text, group_tag_filter="ALL")
         f"🚪 از گروه‌های محدود خارج شد: {result['left']}"
     )
     await bot_client.send_message(ADMIN_ID, report)
+
+
+async def _scan_pvs_for_links(bot_client):
+    """اسکن پیوی‌های همه اکانت‌ها و استخراج لینک‌های تلگرامی — تابع مشترک"""
+    import re
+    from pyrogram import enums as en
+    from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
+    from handlers.text_handler import _link_hash
+
+    LINK_RE = re.compile(r'https?://t\.me/[^\s\]\)"\']+')
+
+    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+    total_new = 0
+
+    for (acc_id,) in accs:
+        uc = await get_user_client(acc_id)
+        if not uc:
+            continue
+        try:
+            await uc.start()
+            async for dlg in uc.get_dialogs():
+                if dlg.chat.type != en.ChatType.PRIVATE:
+                    continue
+                try:
+                    async for msg in uc.get_chat_history(dlg.chat.id, limit=50):
+                        txt = msg.text or msg.caption or ""
+                        for raw_link in LINK_RE.findall(txt):
+                            link = raw_link.rstrip(".,;:!?)")
+                            lh = _link_hash(link)
+                            # چک نبودن در used_links
+                            used = q(
+                                "SELECT 1 FROM used_links WHERE admin_id=%s AND link_hash=%s",
+                                (ADMIN_ID, lh)
+                            )
+                            if used:
+                                continue
+                            try:
+                                u(
+                                    "INSERT IGNORE INTO pv_links (admin_id, link, link_hash) "
+                                    "VALUES (%s, %s, %s)",
+                                    (ADMIN_ID, link[:500], lh)
+                                )
+                                # اگه واقعاً insert شد (نه ignore) شمارش می‌کنیم
+                            except Exception as e:
+                                print(f"[PVScan] خطا در ذخیره لینک: {e}")
+                except Exception as e:
+                    print(f"[PVScan] خطا در خواندن پیام‌های {dlg.chat.id}: {e}")
+            await uc.stop()
+        except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
+            u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
+            try: await uc.stop()
+            except Exception: pass
+            continue
+        except Exception as e:
+            print(f"[PVScan] خطا در اکانت {acc_id}: {e}")
+            try: await uc.stop()
+            except Exception: pass
+            continue
+        await asyncio.sleep(2)
+
+    # شمارش لینک‌های جدید بعد از اسکن (ساده‌ترین روش)
+    cnt_row = q("SELECT COUNT(*) FROM pv_links WHERE admin_id=%s", (ADMIN_ID,))
+    total_links = cnt_row[0][0] if cnt_row else 0
+
+    from datetime import datetime
+    now = datetime.utcnow()
+    u(
+        "INSERT INTO pv_join_settings (admin_id, last_scan) VALUES (%s, %s) "
+        "ON DUPLICATE KEY UPDATE last_scan=%s",
+        (ADMIN_ID, now, now)
+    )
+
+    if bot_client:
+        try:
+            await bot_client.send_message(
+                ADMIN_ID,
+                f"✅ اسکن تمام شد\n"
+                f"📱 اکانت‌ها: {len(accs)}\n"
+                f"🔗 لینک‌های موجود در لیست: {total_links}"
+            )
+        except Exception as e:
+            print(f"[PVScan] خطا در ارسال گزارش: {e}")
