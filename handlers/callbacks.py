@@ -1398,6 +1398,145 @@ def register(app):
                     reply_markup=back_kb("g_pvjoin_settings")
                 )
 
+            # ══ دستیار هوشمند ══
+            elif d == "ai_menu":
+                r = q("SELECT api_key, pv_active, group_active FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                if not r:
+                    u("INSERT IGNORE INTO ai_settings (admin_id) VALUES (%s)", (ADMIN_ID,))
+                    r = q("SELECT api_key, pv_active, group_active FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                api_key   = (r[0][0] or "") if r else ""
+                pv_active    = r[0][1] if r else 0
+                group_active = r[0][2] if r else 0
+                await cb.message.edit_text(
+                    "🤖 **دستیار هوشمند**\n\nبا استفاده از NaraRouter API "
+                    "اکانت‌هایت به پیوی‌ها و منشن‌های گروه جواب می‌دن.",
+                    reply_markup=ai_menu_kb(pv_active, group_active, bool(api_key))
+                )
+
+            elif d == "ai_set_key":
+                set_step(ADMIN_ID, "ai_key")
+                await cb.message.edit_text(
+                    "🔑 **API Key**\n\nAPI Key خود را از https://router.bynara.id وارد کنید:",
+                    reply_markup=back_kb("ai_menu")
+                )
+
+            elif d == "ai_set_model":
+                r = q("SELECT model FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                cur = (r[0][0] or "mimo-v2.5-pro-free") if r else "mimo-v2.5-pro-free"
+                await cb.message.edit_text(
+                    "🧠 **انتخاب مدل**\n\nمدل دلخواه را انتخاب کنید:",
+                    reply_markup=ai_model_kb(cur)
+                )
+
+            elif d.startswith("ai_model_"):
+                model = d[9:]
+                u("INSERT INTO ai_settings (admin_id, model) VALUES (%s,%s) "
+                  "ON DUPLICATE KEY UPDATE model=%s", (ADMIN_ID, model, model))
+                await cb.answer(f"✅ مدل {model} انتخاب شد", show_alert=True)
+                await cb.message.edit_reply_markup(ai_model_kb(model))
+
+            elif d == "ai_set_prompt":
+                set_step(ADMIN_ID, "ai_prompt")
+                await cb.message.edit_text(
+                    "📝 **System Prompt**\n\nشخصیت و رفتار AI را توضیح دهید:",
+                    reply_markup=back_kb("ai_menu")
+                )
+
+            elif d == "ai_pv_menu":
+                r = q("SELECT pv_active, pv_daily_limit, memory_count FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                active      = r[0][0] if r else 0
+                daily_limit = r[0][1] if r else 100
+                memory      = r[0][2] if r else 10
+                await cb.message.edit_text(
+                    "💬 **دستیار پیوی**\n\nاکانت‌ها به پیام‌های پیوی جدید با AI جواب می‌دن.",
+                    reply_markup=ai_pv_menu_kb(active, daily_limit, memory)
+                )
+
+            elif d == "ai_pv_tog":
+                r = q("SELECT pv_active FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                new = 0 if (r and r[0][0]) else 1
+                u("INSERT INTO ai_settings (admin_id, pv_active) VALUES (%s,%s) "
+                  "ON DUPLICATE KEY UPDATE pv_active=%s", (ADMIN_ID, new, new))
+                await cb.answer(f"دستیار پیوی {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
+                r2 = q("SELECT pv_active, pv_daily_limit, memory_count FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                await cb.message.edit_reply_markup(
+                    ai_pv_menu_kb(r2[0][0] if r2 else new, r2[0][1] if r2 else 100, r2[0][2] if r2 else 10)
+                )
+
+            elif d == "ai_pv_set_limit":
+                set_step(ADMIN_ID, "ai_pv_limit")
+                await cb.message.edit_text(
+                    "📊 **محدودیت روزانه پیوی**\n\nتعداد پیام در روز (۱ تا ۱۰۰۰) را وارد کنید:",
+                    reply_markup=back_kb("ai_pv_menu")
+                )
+
+            elif d == "ai_set_memory":
+                set_step(ADMIN_ID, "ai_memory")
+                await cb.message.edit_text(
+                    "🧠 **حافظه مکالمه**\n\nتعداد پیام‌های قبلی برای حافظه (۱ تا ۲۰) را وارد کنید:",
+                    reply_markup=back_kb("ai_menu")
+                )
+
+            elif d == "ai_group_menu":
+                r = q("SELECT group_active, memory_count FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                active = r[0][0] if r else 0
+                memory = r[0][1] if r else 10
+                await cb.message.edit_text(
+                    "👥 **دستیار گروه**\n\nوقتی اکانت در گروه منشن بشه، AI جواب می‌ده.",
+                    reply_markup=ai_group_menu_kb(active, memory)
+                )
+
+            elif d == "ai_group_tog":
+                r = q("SELECT group_active FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                new = 0 if (r and r[0][0]) else 1
+                u("INSERT INTO ai_settings (admin_id, group_active) VALUES (%s,%s) "
+                  "ON DUPLICATE KEY UPDATE group_active=%s", (ADMIN_ID, new, new))
+                await cb.answer(f"دستیار گروه {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
+                r2 = q("SELECT group_active, memory_count FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                await cb.message.edit_reply_markup(
+                    ai_group_menu_kb(r2[0][0] if r2 else new, r2[0][1] if r2 else 10)
+                )
+
+            elif d == "ai_admin_chat":
+                set_step(ADMIN_ID, "ai_admin_question")
+                await cb.message.edit_text(
+                    "💡 **دستیار اطلاعاتی**\n\nسوال خود را بپرسید:",
+                    reply_markup=back_kb("ai_menu")
+                )
+
+            elif d == "ai_stats":
+                from datetime import date as _date
+                today = _date.today()
+                stats = q(
+                    "SELECT SUM(requests), SUM(tokens_used) FROM ai_stats "
+                    "WHERE admin_id=%s AND stat_date=%s",
+                    (ADMIN_ID, today)
+                )
+                total_req = (stats[0][0] or 0) if stats else 0
+                total_tok = (stats[0][1] or 0) if stats else 0
+                top = q(
+                    "SELECT account_id, requests FROM ai_stats "
+                    "WHERE admin_id=%s AND stat_date=%s ORDER BY requests DESC LIMIT 1",
+                    (ADMIN_ID, today)
+                )
+                top_acc = top[0][0] if top else "-"
+                await cb.message.edit_text(
+                    f"📊 **آمار دستیار هوشمند امروز**\n\n"
+                    f"درخواست‌ها: {total_req}\n"
+                    f"توکن مصرفی: {total_tok}\n"
+                    f"فعال‌ترین اکانت: {top_acc}",
+                    reply_markup=back_kb("ai_menu")
+                )
+
+            elif d == "ai_clear_history":
+                u("DELETE FROM ai_conversations WHERE admin_id=%s", (ADMIN_ID,))
+                await cb.answer("✅ تاریخچه مکالمات پاک شد", show_alert=True)
+                r = q("SELECT api_key, pv_active, group_active FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
+                api_key      = (r[0][0] or "") if r else ""
+                pv_active    = r[0][1] if r else 0
+                group_active = r[0][2] if r else 0
+                await cb.message.edit_reply_markup(ai_menu_kb(pv_active, group_active, bool(api_key)))
+
 
         except Exception as e:
             print(f"[CB ERROR] {d}: {e}")
