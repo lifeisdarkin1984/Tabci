@@ -16,6 +16,8 @@ AVAILABLE_MODELS = [
     "mimo-v2.5-pro-hermes",
 ]
 
+DEFAULT_SYSTEM_PROMPT = "تو یه دوست صمیمی و خوش‌مشرب هستی که به فارسی روان صحبت می‌کنی. طبیعی و دوستانه جواب بده."
+
 # ─── تنظیمات ─────────────────────────────────────────────────
 
 async def _get_settings():
@@ -30,7 +32,7 @@ async def _get_settings():
     return {
         "api_key":          r[0][0] or "",
         "model":            r[0][1] or "mimo-v2.5-pro-free",
-        "system_prompt":    r[0][2] or "",
+        "system_prompt":    r[0][2] or DEFAULT_SYSTEM_PROMPT,
         "pv_active":        r[0][3],
         "pv_daily_limit":   r[0][4],
         "group_active":     r[0][5],
