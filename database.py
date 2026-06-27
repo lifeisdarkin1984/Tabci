@@ -192,7 +192,7 @@ def init_db():
             admin_id BIGINT PRIMARY KEY,
             api_key VARCHAR(200) DEFAULT '',
             model VARCHAR(100) DEFAULT 'mimo-v2.5-pro-free',
-            system_prompt TEXT DEFAULT 'تو یه دوست صمیمی و خوش‌مشرب هستی که به فارسی روان صحبت می‌کنی. طبیعی و دوستانه جواب بده.',
+            system_prompt TEXT,
             pv_active TINYINT DEFAULT 0,
             pv_daily_limit INT DEFAULT 100,
             group_active TINYINT DEFAULT 0,
