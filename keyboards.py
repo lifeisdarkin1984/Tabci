@@ -72,6 +72,7 @@ def global_kb():
          InlineKeyboardButton("♻️ وضعیت اکانت‌ها", callback_data="g_status")],
         [InlineKeyboardButton("🏷 مدیریت برچسب‌ها", callback_data="tags_menu")],
         [InlineKeyboardButton("📥 جوین از پیوی‌ها", callback_data="g_pvjoin")],
+        [InlineKeyboardButton("🤖 دستیار هوشمند", callback_data="ai_menu")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ])
 
@@ -270,6 +271,57 @@ def pv_join_settings_kb(auto_scan, interval_hours, daily_limit):
         [InlineKeyboardButton(f"📊 سقف روزانه: {daily_limit} لینک", callback_data="g_pvjoin_set_limit")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="g_pvjoin")],
     ])
+
+# ─── دستیار هوشمند ───────────────────────────────────────────
+def ai_menu_kb(pv_active, group_active, has_key):
+    key_lbl = "✅ تنظیم‌شده" if has_key else "❌ تنظیم نشده"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🔑 API Key: {key_lbl}", callback_data="ai_set_key")],
+        [InlineKeyboardButton("🧠 انتخاب مدل", callback_data="ai_set_model")],
+        [InlineKeyboardButton("📝 تنظیم System Prompt", callback_data="ai_set_prompt")],
+        [InlineKeyboardButton(
+            f"💬 دستیار پیوی: {'🟢 فعال' if pv_active else '🔴 غیرفعال'}",
+            callback_data="ai_pv_menu")],
+        [InlineKeyboardButton(
+            f"👥 دستیار گروه: {'🟢 فعال' if group_active else '🔴 غیرفعال'}",
+            callback_data="ai_group_menu")],
+        [InlineKeyboardButton("💡 دستیار اطلاعاتی", callback_data="ai_admin_chat")],
+        [InlineKeyboardButton("📊 آمار امروز", callback_data="ai_stats")],
+        [InlineKeyboardButton("🗑 پاک کردن تاریخچه", callback_data="ai_clear_history")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
+    ])
+
+def ai_pv_menu_kb(active, daily_limit, memory_count):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"{'🔴 غیرفعال کردن' if active else '🟢 فعال کردن'} دستیار پیوی",
+            callback_data="ai_pv_tog")],
+        [InlineKeyboardButton(f"📊 محدودیت روزانه: {daily_limit} پیام", callback_data="ai_pv_set_limit")],
+        [InlineKeyboardButton(f"🧠 حافظه: {memory_count} پیام اخیر", callback_data="ai_set_memory")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="ai_menu")],
+    ])
+
+def ai_group_menu_kb(active, memory_count):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"{'🔴 غیرفعال کردن' if active else '🟢 فعال کردن'} دستیار گروه",
+            callback_data="ai_group_tog")],
+        [InlineKeyboardButton(f"🧠 حافظه: {memory_count} پیام اخیر", callback_data="ai_set_memory")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="ai_menu")],
+    ])
+
+def ai_model_kb(current_model):
+    models = [
+        "mimo-v2.5-free", "mimo-v2.5-pro-free",
+        "mistral-large", "mistral-medium-3-5",
+        "mimo-v2.5-hermes", "mimo-v2.5-pro-hermes",
+    ]
+    buttons = []
+    for m in models:
+        lbl = f"✅ {m}" if m == current_model else m
+        buttons.append([InlineKeyboardButton(lbl, callback_data=f"ai_model_{m}")])
+    buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="ai_menu")])
+    return InlineKeyboardMarkup(buttons)
 
 # ─── مدیریت برچسب‌ها ────────────────────────────────────────
 def tags_menu_kb():

@@ -188,6 +188,38 @@ def init_db():
             daily_limit INT DEFAULT 20,
             last_scan TIMESTAMP NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS ai_settings (
+            admin_id BIGINT PRIMARY KEY,
+            api_key VARCHAR(200) DEFAULT '',
+            model VARCHAR(100) DEFAULT 'mimo-v2.5-pro-free',
+            system_prompt TEXT DEFAULT 'تو یه دوست صمیمی و خوش‌مشرب هستی که به فارسی روان صحبت می‌کنی. طبیعی و دوستانه جواب بده.',
+            pv_active TINYINT DEFAULT 0,
+            pv_daily_limit INT DEFAULT 100,
+            group_active TINYINT DEFAULT 0,
+            group_tag_filter VARCHAR(50) DEFAULT 'ALL',
+            memory_count INT DEFAULT 10,
+            daily_limit INT DEFAULT 500
+        )""",
+        """CREATE TABLE IF NOT EXISTS ai_conversations (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            account_id VARCHAR(50),
+            user_id BIGINT,
+            context ENUM('pv','group','admin') DEFAULT 'pv',
+            role ENUM('user','assistant') NOT NULL,
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_user (admin_id, account_id, user_id, context)
+        )""",
+        """CREATE TABLE IF NOT EXISTS ai_stats (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            account_id VARCHAR(50),
+            stat_date DATE,
+            requests INT DEFAULT 0,
+            tokens_used INT DEFAULT 0,
+            UNIQUE KEY uniq_stat (admin_id, account_id, stat_date)
+        )""",
     ]
     for s in stmts:
         try:
