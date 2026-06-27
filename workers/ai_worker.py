@@ -1,11 +1,17 @@
 import asyncio, aiohttp
 from datetime import date
 from pyrogram import enums
-from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
+from pyrogram.errors import (AuthKeyUnregistered, UserDeactivated,
+                              SessionExpired, FloodWait)
 from database import q, u
 from utils import get_user_client, ADMIN_ID
 
 BOT_CLIENT = None
+
+DEFAULT_SYSTEM_PROMPT = (
+    "تو یه دوست صمیمی و خوش‌مشرب هستی که به فارسی روان صحبت می‌کنی. "
+    "طبیعی و دوستانه جواب بده."
+)
 
 AVAILABLE_MODELS = [
     "mimo-v2.5-free",
@@ -15,8 +21,6 @@ AVAILABLE_MODELS = [
     "mimo-v2.5-hermes",
     "mimo-v2.5-pro-hermes",
 ]
-
-DEFAULT_SYSTEM_PROMPT = "تو یه دوست صمیمی و خوش‌مشرب هستی که به فارسی روان صحبت می‌کنی. طبیعی و دوستانه جواب بده."
 
 # ─── تنظیمات ─────────────────────────────────────────────────
 
@@ -90,14 +94,24 @@ def _increment_stats(account_id, tokens=0):
 # ─── جلوگیری از تداخل با منشی ────────────────────────────────
 
 def _is_secretary_replied(acc_id, user_id):
-    """چک می‌کنه منشی همگانی قبلاً به این کاربر در این session جواب داده یا نه"""
     r = q(
         "SELECT replied_users FROM secretary WHERE account_id=%s",
-        (f"g_{acc_id}",)
+        (f"g_{ADMIN_ID}",)
     )
     if not r or not r[0][0]:
         return False
     return str(user_id) in r[0][0].split(",")
+
+# ─── ردیابی آخرین پیام پردازش‌شده ───────────────────────────
+
+def _get_ai_last_msg(acc_id, user_id):
+    r = q(
+        "SELECT id FROM ai_conversations "
+        "WHERE admin_id=%s AND account_id=%s AND user_id=%s AND role='user' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (ADMIN_ID, str(acc_id), user_id)
+    )
+    return r[0][0] if r else 0
 
 # ─── API Call ─────────────────────────────────────────────────
 
@@ -125,7 +139,8 @@ async def ask_ai(api_key, model, system_prompt, history, user_message):
                 timeout=aiohttp.ClientTimeout(total=30)
             ) as resp:
                 if resp.status != 200:
-                    print(f"[AIWorker] API status: {resp.status}")
+                    body = await resp.text()
+                    print(f"[AIWorker] API status {resp.status}: {body[:200]}")
                     return None, 0
                 data = await resp.json()
                 reply = data["choices"][0]["message"]["content"].strip()
@@ -134,83 +149,6 @@ async def ask_ai(api_key, model, system_prompt, history, user_message):
     except Exception as e:
         print(f"[AIWorker] خطا در API: {e}")
         return None, 0
-
-# ─── هندلر پیوی ──────────────────────────────────────────────
-
-async def handle_pv_message(uc, acc_id, msg, settings):
-    user_id = msg.from_user.id if msg.from_user else None
-    if not user_id:
-        return
-
-    # اگه منشی همگانی هم فعاله و قبلاً جواب داده، AI جواب نده
-    if _is_secretary_replied(acc_id, user_id):
-        return
-
-    if not _check_daily_limit(str(acc_id), settings["pv_daily_limit"]):
-        return
-
-    text = msg.text or msg.caption or ""
-    if not text.strip():
-        return
-
-    history = await _get_history(str(acc_id), user_id, "pv", settings["memory_count"])
-    reply, tokens = await ask_ai(
-        settings["api_key"], settings["model"],
-        settings["system_prompt"], history, text
-    )
-    if not reply:
-        return
-
-    _save_message(str(acc_id), user_id, "pv", "user", text)
-    _save_message(str(acc_id), user_id, "pv", "assistant", reply)
-    _increment_stats(str(acc_id), tokens)
-
-    try:
-        await uc.send_message(user_id, reply)
-    except Exception as e:
-        print(f"[AIWorker] خطا در ارسال جواب پیوی: {e}")
-
-# ─── هندلر منشن گروه ─────────────────────────────────────────
-
-async def handle_group_mention(uc, acc_id, msg, settings):
-    user_id = msg.from_user.id if msg.from_user else None
-    chat_id = msg.chat.id
-    if not user_id:
-        return
-
-    if not _check_daily_limit(str(acc_id), settings["daily_limit"]):
-        return
-
-    text = msg.text or msg.caption or ""
-    if not text.strip():
-        return
-
-    # حذف منشن از متن
-    try:
-        me = await uc.get_me()
-        if me.username:
-            text = text.replace(f"@{me.username}", "").strip()
-    except Exception:
-        pass
-    if not text:
-        return
-
-    history = await _get_history(str(acc_id), user_id, "group", settings["memory_count"])
-    reply, tokens = await ask_ai(
-        settings["api_key"], settings["model"],
-        settings["system_prompt"], history, text
-    )
-    if not reply:
-        return
-
-    _save_message(str(acc_id), user_id, "group", "user", text)
-    _save_message(str(acc_id), user_id, "group", "assistant", reply)
-    _increment_stats(str(acc_id), tokens)
-
-    try:
-        await msg.reply(reply)
-    except Exception as e:
-        print(f"[AIWorker] خطا در ارسال جواب گروه: {e}")
 
 # ─── دستیار اطلاعاتی ادمین ───────────────────────────────────
 
@@ -257,52 +195,95 @@ async def handle_admin_question(question):
     )
     return reply or "❌ خطا در دریافت جواب."
 
-# ─── مانیتور اکانت ───────────────────────────────────────────
+# ─── پردازش پیوی‌های یه اکانت (polling) ─────────────────────
 
-async def _monitor_account(acc_id, settings):
+async def _process_account_pvs(acc_id, settings):
+    """
+    آخرین پیام‌های پیوی رو poll می‌کنه و به پیام‌های جدید جواب می‌ده.
+    مثل pv_monitor — start/stop می‌کنه و بعد تموم می‌شه.
+    """
     uc = await get_user_client(str(acc_id))
     if not uc:
         return
+
     try:
         await uc.start()
         me = await uc.get_me()
         my_id = me.id
 
-        @uc.on_message()
-        async def on_msg(client, msg):
+        # گرفتن لیست پیوی‌ها
+        pvs = []
+        async for dlg in uc.get_dialogs():
+            if dlg.chat.type == enums.ChatType.PRIVATE:
+                # پیام‌های سیستمی و خود اکانت رو رد کن
+                if dlg.chat.id in (777000, 42777, my_id):
+                    continue
+                pvs.append(dlg)
+
+        for dlg in pvs:
+            if not _check_daily_limit(str(acc_id), settings["pv_daily_limit"]):
+                break
+
+            user_id = dlg.chat.id
+            # آخرین پیام رو بخون
+            last_msg = None
+            async for msg in uc.get_chat_history(user_id, limit=1):
+                last_msg = msg
+
+            if not last_msg:
+                continue
+            # فقط پیام‌های incoming
+            if last_msg.outgoing:
+                continue
+            # چک کن قبلاً جواب دادیم یا نه
+            # اگه آخرین پیام ما outgoing بود (قبل از این پیام)، جواب دادیم
+            already = False
+            count = 0
+            async for msg in uc.get_chat_history(user_id, limit=3):
+                count += 1
+                if count == 1:
+                    continue  # اولی همون last_msg هست
+                if msg.outgoing:
+                    already = True
+                break
+            if already:
+                continue
+
+            # چک تداخل با منشی
+            if _is_secretary_replied(acc_id, user_id):
+                continue
+
+            text = last_msg.text or last_msg.caption or ""
+            if not text.strip():
+                continue
+
+            history = await _get_history(str(acc_id), user_id, "pv", settings["memory_count"])
+            reply, tokens = await ask_ai(
+                settings["api_key"], settings["model"],
+                settings["system_prompt"], history, text
+            )
+            if not reply:
+                continue
+
             try:
-                # پیوی
-                if (settings["pv_active"] and
-                        msg.chat.type == enums.ChatType.PRIVATE and
-                        msg.from_user and msg.from_user.id != my_id):
-                    await handle_pv_message(uc, acc_id, msg, settings)
-
-                # منشن در گروه
-                elif (settings["group_active"] and
-                      msg.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP)):
-                    if me.username:
-                        text = msg.text or msg.caption or ""
-                        entities = msg.entities or msg.caption_entities or []
-                        is_mentioned = (
-                            f"@{me.username}" in text and
-                            any(e.type.name == "MENTION" for e in entities)
-                        )
-                        if is_mentioned:
-                            await handle_group_mention(uc, acc_id, msg, settings)
+                await uc.send_message(user_id, reply)
+                _save_message(str(acc_id), user_id, "pv", "user", text)
+                _save_message(str(acc_id), user_id, "pv", "assistant", reply)
+                _increment_stats(str(acc_id), tokens)
+                await asyncio.sleep(2)
+            except FloodWait as e:
+                await asyncio.sleep(min(e.value, 60))
             except Exception as e:
-                print(f"[AIWorker] خطا در on_msg: {e}")
+                print(f"[AIWorker] خطا در ارسال به {user_id}: {e}")
 
-        await asyncio.Event().wait()
+        await uc.stop()
 
     except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
         print(f"[AIWorker] اکانت {acc_id} منقضی.")
         try: await uc.stop()
         except Exception: pass
-    except asyncio.CancelledError:
-        try: await uc.stop()
-        except Exception: pass
     except Exception as e:
-        print(f"[AIWorker] خطا اکانت {acc_id}: {e}")
+        print(f"[AIWorker] خطا در اکانت {acc_id}: {e}")
         try: await uc.stop()
         except Exception: pass
 
@@ -310,24 +291,20 @@ async def _monitor_account(acc_id, settings):
 
 async def run():
     print("🤖 AI worker started")
-    await asyncio.sleep(10)
-    tasks = {}
+    await asyncio.sleep(15)  # صبر می‌کنه بقیه worker‌ها بیان بالا
+
     while True:
         try:
             settings = await _get_settings()
-            if settings and settings["api_key"] and (settings["pv_active"] or settings["group_active"]):
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+            if settings and settings["api_key"] and settings["pv_active"]:
+                accs = q(
+                    "SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
+                    (ADMIN_ID,)
+                )
                 for (acc_id,) in (accs or []):
-                    if acc_id not in tasks or tasks[acc_id].done():
-                        tasks[acc_id] = asyncio.create_task(
-                            _monitor_account(acc_id, settings)
-                        )
-            else:
-                # اگه غیرفعال شد، taskها رو cancel کن
-                for acc_id, task in list(tasks.items()):
-                    if not task.done():
-                        task.cancel()
-                tasks.clear()
+                    await _process_account_pvs(acc_id, settings)
+                    await asyncio.sleep(3)  # فاصله بین اکانت‌ها
         except Exception as e:
             print(f"[AIWorker] خطای کلی: {e}")
-        await asyncio.sleep(300)
+
+        await asyncio.sleep(120)  # هر ۲ دقیقه poll می‌کنه
