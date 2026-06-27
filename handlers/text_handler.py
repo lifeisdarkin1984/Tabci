@@ -461,81 +461,9 @@ def register(app):
             clear_step(ADMIN_ID)
             return
 
-        # ── دستیار هوشمند ──
-        elif step == "ai_key":
-            u("INSERT INTO ai_settings (admin_id, api_key) VALUES (%s,%s) "
-              "ON DUPLICATE KEY UPDATE api_key=%s",
-              (ADMIN_ID, text, text))
-            r = q("SELECT pv_active, group_active FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
-            pv_active    = r[0][0] if r else 0
-            group_active = r[0][1] if r else 0
-            from keyboards import ai_menu_kb
-            await message.reply("✅ API Key ذخیره شد.",
-                                reply_markup=ai_menu_kb(pv_active, group_active, True))
-            clear_step(ADMIN_ID)
-            return
-
-        elif step == "ai_prompt":
-            u("INSERT INTO ai_settings (admin_id, system_prompt) VALUES (%s,%s) "
-              "ON DUPLICATE KEY UPDATE system_prompt=%s",
-              (ADMIN_ID, text, text))
-            r = q("SELECT api_key, pv_active, group_active FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
-            from keyboards import ai_menu_kb
-            await message.reply("✅ System Prompt ذخیره شد.",
-                                reply_markup=ai_menu_kb(
-                                    r[0][1] if r else 0,
-                                    r[0][2] if r else 0,
-                                    bool(r[0][0]) if r else False
-                                ))
-            clear_step(ADMIN_ID)
-            return
-
-        elif step == "ai_pv_limit":
-            if not text.isdigit() or not (1 <= int(text) <= 1000):
-                await message.reply("❌ عدد بین ۱ تا ۱۰۰۰ وارد کنید.")
-                return
-            val = int(text)
-            u("INSERT INTO ai_settings (admin_id, pv_daily_limit) VALUES (%s,%s) "
-              "ON DUPLICATE KEY UPDATE pv_daily_limit=%s",
-              (ADMIN_ID, val, val))
-            r = q("SELECT pv_active, pv_daily_limit, memory_count FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
-            from keyboards import ai_pv_menu_kb
-            await message.reply("✅ محدودیت روزانه ذخیره شد.",
-                                reply_markup=ai_pv_menu_kb(
-                                    r[0][0] if r else 0, r[0][1] if r else val, r[0][2] if r else 10
-                                ))
-            clear_step(ADMIN_ID)
-            return
-
-        elif step == "ai_memory":
-            if not text.isdigit() or not (1 <= int(text) <= 20):
-                await message.reply("❌ عدد بین ۱ تا ۲۰ وارد کنید.")
-                return
-            val = int(text)
-            u("INSERT INTO ai_settings (admin_id, memory_count) VALUES (%s,%s) "
-              "ON DUPLICATE KEY UPDATE memory_count=%s",
-              (ADMIN_ID, val, val))
-            r = q("SELECT api_key, pv_active, group_active FROM ai_settings WHERE admin_id=%s", (ADMIN_ID,))
-            from keyboards import ai_menu_kb
-            await message.reply("✅ حافظه ذخیره شد.",
-                                reply_markup=ai_menu_kb(
-                                    r[0][1] if r else 0,
-                                    r[0][2] if r else 0,
-                                    bool(r[0][0]) if r else False
-                                ))
-            clear_step(ADMIN_ID)
-            return
-
-        elif step == "ai_admin_question":
-            from workers.ai_worker import handle_admin_question
-            await message.reply("⏳ در حال پردازش...")
-            reply = await handle_admin_question(text)
-            await message.reply(reply)
-            clear_step(ADMIN_ID)
-            return
-
         if not step.startswith("bn_file_"):
             return
+        _, _, acc_id, slot, ctx = step.split("_", 4)
         slot = int(slot)
         if message.photo:
             fid, ftype = message.photo.file_id, "photo"
