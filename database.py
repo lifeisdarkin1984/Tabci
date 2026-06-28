@@ -188,6 +188,37 @@ def init_db():
             daily_limit INT DEFAULT 20,
             last_scan TIMESTAMP NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS linkdoni_sources (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            chat_id VARCHAR(100) NOT NULL,
+            chat_title VARCHAR(200) DEFAULT '',
+            last_message_id INT DEFAULT 0,
+            last_scan TIMESTAMP NULL,
+            is_active TINYINT DEFAULT 1,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_source (admin_id, chat_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS linkdoni_links (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            link VARCHAR(500) NOT NULL,
+            link_hash VARCHAR(64) NOT NULL,
+            source_id INT,
+            found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            joined TINYINT DEFAULT 0,
+            UNIQUE KEY uniq_link (admin_id, link_hash)
+        )""",
+        """CREATE TABLE IF NOT EXISTS linkdoni_settings (
+            admin_id BIGINT PRIMARY KEY,
+            auto_scan TINYINT DEFAULT 0,
+            scan_interval_hours INT DEFAULT 6,
+            auto_join TINYINT DEFAULT 0,
+            join_mode ENUM('random','split','all') DEFAULT 'split',
+            join_tag VARCHAR(50) DEFAULT '',
+            scan_account_mode ENUM('random') DEFAULT 'random',
+            last_auto_scan TIMESTAMP NULL
+        )""",
     ]
     for s in stmts:
         try:

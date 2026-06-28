@@ -72,6 +72,7 @@ def global_kb():
          InlineKeyboardButton("♻️ وضعیت اکانت‌ها", callback_data="g_status")],
         [InlineKeyboardButton("🏷 مدیریت برچسب‌ها", callback_data="tags_menu")],
         [InlineKeyboardButton("📥 جوین از پیوی‌ها", callback_data="g_pvjoin")],
+        [InlineKeyboardButton("📡 لینکدونی هوشمند", callback_data="ld_menu")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
     ])
 
@@ -318,4 +319,76 @@ def account_tag_kb(accounts):
         )])
     rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="tags_menu")])
     return InlineKeyboardMarkup(rows)
+
+
+# ─── لینکدونی هوشمند ─────────────────────────────────────────
+
+def ld_menu_kb(source_count, pending_count, auto_scan, auto_join):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"📋 مدیریت لینکدونی‌ها ({source_count} عدد)",
+                              callback_data="ld_sources")],
+        [InlineKeyboardButton("🔍 اسکن فوری", callback_data="ld_scan_now")],
+        [InlineKeyboardButton(f"🔗 لینک‌های دریافتی ({pending_count} عدد)",
+                              callback_data="ld_show_links")],
+        [InlineKeyboardButton("✅ جوین دستی لینک‌ها", callback_data="ld_join_manual")],
+        [InlineKeyboardButton("⚙️ تنظیمات", callback_data="ld_settings")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
+    ])
+
+
+def ld_sources_kb(sources):
+    buttons = []
+    for s in sources:
+        lbl = f"{'✅' if s['is_active'] else '⏸'} {s['chat_title'] or s['chat_id']}"
+        buttons.append([InlineKeyboardButton(lbl,
+                        callback_data=f"ld_src_{s['id']}")])
+    buttons.append([InlineKeyboardButton("➕ افزودن لینکدونی",
+                    callback_data="ld_add_source")])
+    buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="ld_menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def ld_source_detail_kb(source_id, is_active):
+    toggle_lbl = "⏸ غیرفعال کردن" if is_active else "▶️ فعال کردن"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(toggle_lbl,
+                              callback_data=f"ld_src_tog_{source_id}")],
+        [InlineKeyboardButton("🗑 حذف", callback_data=f"ld_src_del_{source_id}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="ld_sources")],
+    ])
+
+
+def ld_settings_kb(auto_scan, interval, auto_join, join_mode, join_tag):
+    mode_labels = {"random": "رندوم", "split": "تقسیم", "all": "همه به همه"}
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"اسکن خودکار: {'🟢 فعال' if auto_scan else '🔴 غیرفعال'}",
+            callback_data="ld_tog_autoscan")],
+        [InlineKeyboardButton(f"⏰ فاصله اسکن: هر {interval} ساعت",
+                              callback_data="ld_set_interval")],
+        [InlineKeyboardButton(
+            f"جوین خودکار: {'🟢 فعال' if auto_join else '🔴 غیرفعال'}",
+            callback_data="ld_tog_autojoin")],
+        [InlineKeyboardButton(
+            f"حالت جوین: {mode_labels.get(join_mode, join_mode)}",
+            callback_data="ld_set_joinmode")],
+        [InlineKeyboardButton(
+            f"🏷 برچسب جوین: {join_tag if join_tag else 'بدون برچسب'}",
+            callback_data="ld_set_tag")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="ld_menu")],
+    ])
+
+
+def ld_joinmode_kb(current):
+    modes = [("random", "رندوم — یه اکانت تصادفی"),
+             ("split", "تقسیم — بین همه اکانت‌ها"),
+             ("all", "همه به همه — همه اکانت‌ها جوین بشن")]
+    buttons = []
+    for key, label in modes:
+        lbl = f"✅ {label}" if key == current else label
+        buttons.append([InlineKeyboardButton(lbl,
+                        callback_data=f"ld_joinmode_{key}")])
+    buttons.append([InlineKeyboardButton("🔙 بازگشت",
+                    callback_data="ld_settings")])
+    return InlineKeyboardMarkup(buttons)
 

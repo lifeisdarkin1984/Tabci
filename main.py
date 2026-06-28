@@ -10,7 +10,7 @@ API_HASH  = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 from handlers import login, text_handler, callbacks
-from workers import secretary, scheduler, reply_worker, react_worker, global_scheduler, pv_monitor
+from workers import secretary, scheduler, reply_worker, react_worker, global_scheduler, pv_monitor, linkdoni_worker
 
 # توقف عملیات - global flag
 stop_flags = {}
@@ -34,6 +34,7 @@ async def main():
     global_scheduler.BOT_CLIENT = app
     secretary.BOT_CLIENT = app
     pv_monitor.BOT_CLIENT = app
+    linkdoni_worker.BOT_CLIENT = app
 
     await asyncio.gather(
         secretary.run(),
@@ -42,6 +43,7 @@ async def main():
         react_worker.run(),
         global_scheduler.run(),
         pv_monitor.run(),
+        linkdoni_worker.run(),
         idle(),
     )
 
