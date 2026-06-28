@@ -392,3 +392,13 @@ def ld_joinmode_kb(current):
                     callback_data="ld_settings")])
     return InlineKeyboardMarkup(buttons)
 
+
+def ld_links_kb(count):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"👁 مشاهده لینک‌ها ({count} عدد)",
+                              callback_data="ld_links_view")],
+        [InlineKeyboardButton("🗑 حذف لینک‌ها",
+                              callback_data="ld_links_clear")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="ld_menu")],
+    ])
+
