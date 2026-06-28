@@ -4,7 +4,8 @@ from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
     InviteHashExpired, InviteHashInvalid, ChannelsTooMuch,
     UsernameOccupied, UsernameInvalid, ChatWriteForbidden,
     UserBannedInChannel, ChatAdminRequired, ChatRestricted,
-    SlowmodeWait, UserBlocked, ChatSendMediaForbidden, RPCError)
+    SlowmodeWait, UserBlocked, ChatSendMediaForbidden, RPCError,
+    InviteRequestSent)
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
                    clear_step, get_user_client, save_account, is_stopped, set_stop,
@@ -749,11 +750,27 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
                 # چک عضویت اجباری بات‌محور (ربات گروه ممکنه بخواد کانال دیگه‌ای رو هم جوین کنیم)
                 try:
                     fj_result = await detect_and_handle_bot_forced_join(uc, result.id)
-                    if fj_result.get("forced_join_detected") and fj_result.get("joined"):
-                        await bot_client.send_message(
-                            ADMIN_ID,
-                            f"🔗 عضویت اجباری در `{fj_result['channel']}` تشخیص داده شد و انجام شد."
-                        )
+                    if fj_result.get("forced_join_detected"):
+                        channel = fj_result.get("channel", "")
+                        joined = fj_result.get("joined", False)
+                        if joined:
+                            await bot_client.send_message(
+                                ADMIN_ID,
+                                f"🔗 **عضویت اجباری تشخیص داده شد**\n"
+                                f"گروه: `{link}`\n"
+                                f"اکانت: `{acc_display}`\n"
+                                f"کانال اجباری: @{channel}\n"
+                                f"✅ عضو کانال شدید"
+                            )
+                        else:
+                            await bot_client.send_message(
+                                ADMIN_ID,
+                                f"⚠️ **عضویت اجباری تشخیص داده شد**\n"
+                                f"گروه: `{link}`\n"
+                                f"اکانت: `{acc_display}`\n"
+                                f"کانال اجباری: @{channel}\n"
+                                f"❌ عضویت در کانال ناموفق بود"
+                            )
                 except Exception as fj_err:
                     print(f"[JoinLinks] خطا در تشخیص عضویت اجباری: {fj_err}")
             await bot_client.send_message(ADMIN_ID, f"✅ [{i}/{len(links)}] عضو شد: `{link}`")
@@ -780,6 +797,16 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
 
         except UserAlreadyParticipant:
             ok_links.append(link)
+
+        except InviteRequestSent:
+            ok_links.append(link)
+            await bot_client.send_message(
+                ADMIN_ID,
+                f"⏳ **درخواست عضویت ارسال شد**\n"
+                f"گروه: `{link}`\n"
+                f"اکانت: `{acc_display}`\n"
+                f"منتظر تأیید ادمین گروه..."
+            )
 
         except (InviteHashExpired, InviteHashInvalid):
             fail_links.append(link)
