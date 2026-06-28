@@ -1398,6 +1398,261 @@ def register(app):
                     reply_markup=back_kb("g_pvjoin_settings")
                 )
 
+            # ══════════════════════════════════════════
+            # ══ لینکدونی هوشمند ══
+            # ══════════════════════════════════════════
+
+            elif d == "ld_menu":
+                src_row = q("SELECT COUNT(*) FROM linkdoni_sources "
+                            "WHERE admin_id=%s AND is_active=1", (ADMIN_ID,))
+                source_count = src_row[0][0] if src_row else 0
+                pend_row = q("SELECT COUNT(*) FROM linkdoni_links "
+                             "WHERE admin_id=%s AND joined=0", (ADMIN_ID,))
+                pending_count = pend_row[0][0] if pend_row else 0
+                st_row = q("SELECT auto_scan, auto_join FROM linkdoni_settings "
+                           "WHERE admin_id=%s", (ADMIN_ID,))
+                auto_scan = st_row[0][0] if st_row else 0
+                auto_join = st_row[0][1] if st_row else 0
+                await cb.message.edit_text(
+                    f"📡 **لینکدونی هوشمند**\n\n"
+                    f"🗂 لینکدونی‌های فعال: {source_count}\n"
+                    f"🔗 لینک‌های در انتظار جوین: {pending_count}",
+                    reply_markup=ld_menu_kb(source_count, pending_count,
+                                           auto_scan, auto_join)
+                )
+
+            elif d == "ld_sources":
+                srcs = q("SELECT id, chat_id, chat_title, is_active "
+                         "FROM linkdoni_sources WHERE admin_id=%s ORDER BY added_at DESC",
+                         (ADMIN_ID,))
+                src_list = [{"id": r[0], "chat_id": r[1],
+                             "chat_title": r[2], "is_active": r[3]} for r in srcs]
+                await cb.message.edit_text(
+                    "📋 **مدیریت لینکدونی‌ها**",
+                    reply_markup=ld_sources_kb(src_list)
+                )
+
+            elif d == "ld_add_source":
+                set_step(ADMIN_ID, "ld_add_source")
+                await cb.message.edit_text(
+                    "➕ **لینک یا یوزرنیم لینکدونی را وارد کنید:**\n"
+                    "(مثال: @linkdoni یا https://t.me/linkdoni)",
+                    reply_markup=back_kb("ld_sources")
+                )
+
+            elif d.startswith("ld_src_tog_"):
+                src_id = int(d[11:])
+                row = q("SELECT is_active FROM linkdoni_sources "
+                        "WHERE id=%s AND admin_id=%s", (src_id, ADMIN_ID))
+                if not row:
+                    await cb.answer("❌ یافت نشد", show_alert=True)
+                else:
+                    new_val = 0 if row[0][0] else 1
+                    u("UPDATE linkdoni_sources SET is_active=%s "
+                      "WHERE id=%s AND admin_id=%s", (new_val, src_id, ADMIN_ID))
+                    src = q("SELECT id, chat_id, chat_title, is_active, last_scan, last_message_id "
+                            "FROM linkdoni_sources WHERE id=%s AND admin_id=%s",
+                            (src_id, ADMIN_ID))
+                    if src:
+                        r = src[0]
+                        last_scan_str = r[4].strftime("%Y/%m/%d %H:%M") if r[4] else "هرگز"
+                        await cb.message.edit_text(
+                            f"📋 **{r[2] or r[1]}**\n🆔 `{r[1]}`\n"
+                            f"📅 آخرین اسکن: {last_scan_str}\n"
+                            f"📨 آخرین پیام اسکن‌شده: {r[5]}",
+                            reply_markup=ld_source_detail_kb(src_id, r[3])
+                        )
+
+            elif d.startswith("ld_src_del_"):
+                src_id = int(d[11:])
+                u("DELETE FROM linkdoni_sources WHERE id=%s AND admin_id=%s",
+                  (src_id, ADMIN_ID))
+                srcs = q("SELECT id, chat_id, chat_title, is_active "
+                         "FROM linkdoni_sources WHERE admin_id=%s ORDER BY added_at DESC",
+                         (ADMIN_ID,))
+                src_list = [{"id": r[0], "chat_id": r[1],
+                             "chat_title": r[2], "is_active": r[3]} for r in srcs]
+                await cb.message.edit_text(
+                    "✅ لینکدونی حذف شد.",
+                    reply_markup=ld_sources_kb(src_list)
+                )
+
+            elif d.startswith("ld_src_"):
+                # جزئیات یک لینکدونی — بعد از بررسی tog و del
+                src_id = int(d[7:])
+                src = q("SELECT id, chat_id, chat_title, is_active, last_scan, last_message_id "
+                        "FROM linkdoni_sources WHERE id=%s AND admin_id=%s",
+                        (src_id, ADMIN_ID))
+                if not src:
+                    await cb.answer("❌ یافت نشد", show_alert=True)
+                else:
+                    r = src[0]
+                    last_scan_str = r[4].strftime("%Y/%m/%d %H:%M") if r[4] else "هرگز"
+                    await cb.message.edit_text(
+                        f"📋 **{r[2] or r[1]}**\n🆔 `{r[1]}`\n"
+                        f"📅 آخرین اسکن: {last_scan_str}\n"
+                        f"📨 آخرین پیام اسکن‌شده: {r[5]}",
+                        reply_markup=ld_source_detail_kb(src_id, r[3])
+                    )
+
+            elif d == "ld_scan_now":
+                await cb.message.edit_text("🔍 در حال اسکن لینکدونی‌ها...")
+
+                async def _do_scan_now(bot_client, msg):
+                    from workers.linkdoni_worker import scan_linkdonis, _get_settings, _do_join
+                    total, new_count, links = await scan_linkdonis("manual")
+                    report = (
+                        f"✅ **اسکن فوری تمام شد**\n\n"
+                        f"🔍 لینک‌های بررسی‌شده: {total}\n"
+                        f"✅ لینک‌های جدید: {new_count}\n"
+                        f"🔄 تکراری حذف‌شده: {total - new_count}"
+                    )
+                    try:
+                        await msg.edit_text(report, reply_markup=back_kb("ld_menu"))
+                    except Exception:
+                        await bot_client.send_message(ADMIN_ID, report)
+                    # جوین خودکار فقط برای اسکن manual فعاله
+                    settings = _get_settings()
+                    if settings["auto_join"] and links:
+                        await _do_join(links, settings)
+
+                asyncio.create_task(_do_scan_now(client, cb.message))
+
+            elif d == "ld_show_links":
+                links_rows = q("SELECT link FROM linkdoni_links "
+                               "WHERE admin_id=%s AND joined=0 ORDER BY found_at DESC",
+                               (ADMIN_ID,))
+                if not links_rows:
+                    await cb.message.edit_text(
+                        "❌ لینک جدیدی موجود نیست. ابتدا اسکن کنید.",
+                        reply_markup=back_kb("ld_menu")
+                    )
+                else:
+                    out = "\n".join(r[0] for r in links_rows)
+                    if len(out) <= 4000:
+                        await cb.message.edit_text(out, reply_markup=back_kb("ld_menu"))
+                    else:
+                        chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
+                        await cb.message.edit_text(
+                            f"🔗 {len(links_rows)} لینک در انتظار جوین:",
+                            reply_markup=back_kb("ld_menu")
+                        )
+                        for chunk in chunks:
+                            await client.send_message(ADMIN_ID, chunk)
+
+            elif d == "ld_join_manual":
+                links_rows = q("SELECT link FROM linkdoni_links "
+                               "WHERE admin_id=%s AND joined=0 ORDER BY found_at DESC",
+                               (ADMIN_ID,))
+                if not links_rows:
+                    await cb.message.edit_text(
+                        "❌ لینک جدیدی برای جوین وجود ندارد.",
+                        reply_markup=back_kb("ld_menu")
+                    )
+                else:
+                    links = [r[0] for r in links_rows]
+                    set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
+                    tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name",
+                             (ADMIN_ID,))
+                    tag_list = [t[0] for t in tags]
+                    await cb.message.edit_text(
+                        f"✅ **{len(links)} لینک آماده جوین**\n\nبرچسب گروه‌ها را انتخاب کنید:",
+                        reply_markup=tag_select_kb(tag_list, "gjointag", show_all=False)
+                    )
+
+            elif d == "ld_settings":
+                st_row = q("SELECT auto_scan, scan_interval_hours, auto_join, join_mode, join_tag "
+                           "FROM linkdoni_settings WHERE admin_id=%s", (ADMIN_ID,))
+                if not st_row:
+                    u("INSERT IGNORE INTO linkdoni_settings (admin_id) VALUES (%s)", (ADMIN_ID,))
+                    auto_scan, interval, auto_join, join_mode, join_tag = 0, 6, 0, "split", ""
+                else:
+                    auto_scan, interval, auto_join, join_mode, join_tag = (
+                        st_row[0][0], st_row[0][1], st_row[0][2],
+                        st_row[0][3], st_row[0][4] or ""
+                    )
+                await cb.message.edit_text(
+                    "⚙️ **تنظیمات لینکدونی هوشمند**",
+                    reply_markup=ld_settings_kb(auto_scan, interval, auto_join,
+                                               join_mode, join_tag)
+                )
+
+            elif d == "ld_tog_autoscan":
+                st_row = q("SELECT auto_scan FROM linkdoni_settings WHERE admin_id=%s",
+                           (ADMIN_ID,))
+                if not st_row:
+                    u("INSERT IGNORE INTO linkdoni_settings (admin_id) VALUES (%s)", (ADMIN_ID,))
+                    cur_val = 0
+                else:
+                    cur_val = st_row[0][0]
+                new_val = 0 if cur_val else 1
+                u("UPDATE linkdoni_settings SET auto_scan=%s WHERE admin_id=%s",
+                  (new_val, ADMIN_ID))
+                st_row2 = q("SELECT auto_scan, scan_interval_hours, auto_join, join_mode, join_tag "
+                            "FROM linkdoni_settings WHERE admin_id=%s", (ADMIN_ID,))
+                r = st_row2[0] if st_row2 else (new_val, 6, 0, "split", "")
+                await cb.message.edit_reply_markup(
+                    ld_settings_kb(r[0], r[1], r[2], r[3], r[4] or "")
+                )
+
+            elif d == "ld_set_interval":
+                set_step(ADMIN_ID, "ld_interval")
+                await cb.message.edit_text(
+                    "⏰ **فاصله اسکن خودکار**\n\n"
+                    "عدد ساعت را وارد کنید (۱ تا ۱۶۸):",
+                    reply_markup=back_kb("ld_settings")
+                )
+
+            elif d == "ld_tog_autojoin":
+                st_row = q("SELECT auto_join FROM linkdoni_settings WHERE admin_id=%s",
+                           (ADMIN_ID,))
+                if not st_row:
+                    u("INSERT IGNORE INTO linkdoni_settings (admin_id) VALUES (%s)", (ADMIN_ID,))
+                    cur_val = 0
+                else:
+                    cur_val = st_row[0][0]
+                new_val = 0 if cur_val else 1
+                u("UPDATE linkdoni_settings SET auto_join=%s WHERE admin_id=%s",
+                  (new_val, ADMIN_ID))
+                st_row2 = q("SELECT auto_scan, scan_interval_hours, auto_join, join_mode, join_tag "
+                            "FROM linkdoni_settings WHERE admin_id=%s", (ADMIN_ID,))
+                r = st_row2[0] if st_row2 else (0, 6, new_val, "split", "")
+                await cb.message.edit_reply_markup(
+                    ld_settings_kb(r[0], r[1], r[2], r[3], r[4] or "")
+                )
+
+            elif d == "ld_set_joinmode":
+                st_row = q("SELECT join_mode FROM linkdoni_settings WHERE admin_id=%s",
+                           (ADMIN_ID,))
+                current_mode = st_row[0][0] if st_row else "split"
+                await cb.message.edit_text(
+                    "🔄 **حالت جوین را انتخاب کنید:**",
+                    reply_markup=ld_joinmode_kb(current_mode)
+                )
+
+            elif d.startswith("ld_joinmode_"):
+                join_mode = d[12:]
+                if join_mode not in ("random", "split", "all"):
+                    await cb.answer("❌ حالت نامعتبر", show_alert=True)
+                else:
+                    u("INSERT INTO linkdoni_settings (admin_id, join_mode) VALUES (%s,%s) "
+                      "ON DUPLICATE KEY UPDATE join_mode=%s",
+                      (ADMIN_ID, join_mode, join_mode))
+                    st_row = q("SELECT auto_scan, scan_interval_hours, auto_join, join_mode, join_tag "
+                               "FROM linkdoni_settings WHERE admin_id=%s", (ADMIN_ID,))
+                    r = st_row[0] if st_row else (0, 6, 0, join_mode, "")
+                    await cb.message.edit_text(
+                        "✅ حالت جوین ذخیره شد.",
+                        reply_markup=ld_settings_kb(r[0], r[1], r[2], r[3], r[4] or "")
+                    )
+
+            elif d == "ld_set_tag":
+                set_step(ADMIN_ID, "ld_tag")
+                await cb.message.edit_text(
+                    "🏷 **برچسب گروه‌های جوین‌شده**\n\n"
+                    "برچسب را وارد کنید یا برای بدون برچسب، یک فاصله بفرستید:",
+                    reply_markup=back_kb("ld_settings")
+                )
 
         except Exception as e:
             print(f"[CB ERROR] {d}: {e}")

@@ -300,6 +300,112 @@ def register(app):
                 reply_markup=confirm_kb("g_sgrp_go", "menu_global")
             )
 
+        elif step == "ld_add_source":
+            # پارس کردن ورودی
+            raw = text.strip()
+            if raw.startswith("https://t.me/"):
+                chat_input = raw.split("t.me/")[-1].strip("/").split("?")[0]
+            elif raw.startswith("@"):
+                chat_input = raw.lstrip("@")
+            elif raw.lstrip("-").isdigit():
+                chat_input = raw
+            else:
+                chat_input = raw.lstrip("@")
+
+            # گرفتن اطلاعات واقعی با یه اکانت رندوم
+            import random as _random
+            accs_ld = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
+                        (ADMIN_ID,))
+            if not accs_ld:
+                await message.reply("❌ هیچ اکانت فعالی وجود ندارد.",
+                                    reply_markup=back_kb("ld_sources"))
+                clear_step(ADMIN_ID); return
+
+            acc_id_ld = str(_random.choice(accs_ld)[0])
+            uc_ld = await get_user_client(acc_id_ld)
+            if not uc_ld:
+                await message.reply("❌ اکانت در دسترس نیست.",
+                                    reply_markup=back_kb("ld_sources"))
+                clear_step(ADMIN_ID); return
+
+            msg_ld = await message.reply("⏳ در حال دریافت اطلاعات لینکدونی...")
+            try:
+                await uc_ld.start()
+                try:
+                    target_ld = int(chat_input)
+                except ValueError:
+                    target_ld = chat_input
+                chat_info = await uc_ld.get_chat(target_ld)
+                real_id = str(chat_info.id)
+                title = getattr(chat_info, 'title', '') or chat_input
+                await uc_ld.stop()
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                try: await uc_ld.stop()
+                except Exception: pass
+                await msg_ld.edit_text("❌ محدودیت تلگرام. دوباره امتحان کنید.")
+                clear_step(ADMIN_ID); return
+            except Exception:
+                try: await uc_ld.stop()
+                except Exception: pass
+                real_id = chat_input
+                title = chat_input
+
+            try:
+                u("INSERT IGNORE INTO linkdoni_sources "
+                  "(admin_id, chat_id, chat_title) VALUES (%s,%s,%s)",
+                  (ADMIN_ID, real_id, title[:200]))
+                from keyboards import ld_sources_kb
+                srcs = q("SELECT id, chat_id, chat_title, is_active "
+                         "FROM linkdoni_sources WHERE admin_id=%s ORDER BY added_at DESC",
+                         (ADMIN_ID,))
+                src_list = [{"id": r[0], "chat_id": r[1],
+                             "chat_title": r[2], "is_active": r[3]} for r in srcs]
+                await msg_ld.edit_text(
+                    f"✅ لینکدونی **{title}** اضافه شد.",
+                    reply_markup=ld_sources_kb(src_list)
+                )
+            except Exception as ex:
+                await msg_ld.edit_text(f"❌ خطا در ذخیره: {ex}",
+                                       reply_markup=back_kb("ld_sources"))
+            clear_step(ADMIN_ID)
+
+        elif step == "ld_interval":
+            if not text.isdigit() or not (1 <= int(text) <= 168):
+                await message.reply("❌ عدد بین ۱ تا ۱۶۸ وارد کنید.")
+                return
+            val = int(text)
+            u("INSERT INTO linkdoni_settings (admin_id, scan_interval_hours) "
+              "VALUES (%s,%s) ON DUPLICATE KEY UPDATE scan_interval_hours=%s",
+              (ADMIN_ID, val, val))
+            row = q("SELECT auto_scan, scan_interval_hours, auto_join, join_mode, join_tag "
+                    "FROM linkdoni_settings WHERE admin_id=%s", (ADMIN_ID,))
+            from keyboards import ld_settings_kb
+            if row:
+                kb = ld_settings_kb(row[0][0], row[0][1], row[0][2],
+                                    row[0][3], row[0][4] or "")
+            else:
+                kb = ld_settings_kb(0, val, 0, "split", "")
+            await message.reply(f"✅ فاصله اسکن: هر {val} ساعت", reply_markup=kb)
+            clear_step(ADMIN_ID)
+
+        elif step == "ld_tag":
+            tag_val = text.strip() if text.strip() else ""
+            u("INSERT INTO linkdoni_settings (admin_id, join_tag) "
+              "VALUES (%s,%s) ON DUPLICATE KEY UPDATE join_tag=%s",
+              (ADMIN_ID, tag_val, tag_val))
+            row = q("SELECT auto_scan, scan_interval_hours, auto_join, join_mode, join_tag "
+                    "FROM linkdoni_settings WHERE admin_id=%s", (ADMIN_ID,))
+            from keyboards import ld_settings_kb
+            if row:
+                kb = ld_settings_kb(row[0][0], row[0][1], row[0][2],
+                                    row[0][3], row[0][4] or "")
+            else:
+                kb = ld_settings_kb(0, 6, 0, "split", tag_val)
+            lbl = f"«{tag_val}»" if tag_val else "بدون برچسب"
+            await message.reply(f"✅ برچسب ذخیره شد: {lbl}", reply_markup=kb)
+            clear_step(ADMIN_ID)
+
         elif step == "g_pvjoin_interval":
             if not text.isdigit() or not (1 <= int(text) <= 24):
                 await message.reply("❌ عدد بین ۱ تا ۲۴ وارد کنید.")
@@ -698,6 +804,14 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
     # ذخیره لینک‌های موفق در used_links تا دفعه بعد تکراری شناخته بشن
     if ok_links:
         _save_used_links(ok_links)
+        # آپدیت وضعیت joined در linkdoni_links
+        for lnk in ok_links:
+            h = _link_hash(lnk)
+            try:
+                u("UPDATE linkdoni_links SET joined=1 "
+                  "WHERE admin_id=%s AND link_hash=%s", (ADMIN_ID, h))
+            except Exception:
+                pass
     tag_lbl = f" — 🏷 {tag}" if tag else ""
     report = (f"✅ عملیات عضویت تمام شد{tag_lbl}\n👤 {acc_display}\n"
               f"موفق: {len(ok_links)}\nناموفق: {len(fail_links)}")
