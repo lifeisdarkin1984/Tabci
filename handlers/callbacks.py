@@ -1519,26 +1519,52 @@ def register(app):
                 asyncio.create_task(_do_scan_now(client, cb.message))
 
             elif d == "ld_show_links":
-                links_rows = q("SELECT link FROM linkdoni_links "
-                               "WHERE admin_id=%s AND joined=0 ORDER BY found_at DESC",
-                               (ADMIN_ID,))
-                if not links_rows:
+                cnt_row = q("SELECT COUNT(*) FROM linkdoni_links "
+                            "WHERE admin_id=%s AND joined=0", (ADMIN_ID,))
+                count = cnt_row[0][0] if cnt_row else 0
+                if count == 0:
                     await cb.message.edit_text(
                         "❌ لینک جدیدی موجود نیست. ابتدا اسکن کنید.",
                         reply_markup=back_kb("ld_menu")
                     )
                 else:
+                    await cb.message.edit_text(
+                        f"🔗 **لینک‌های دریافتی**\n\n{count} لینک در انتظار:",
+                        reply_markup=ld_links_kb(count)
+                    )
+
+            elif d == "ld_links_view":
+                links_rows = q("SELECT link FROM linkdoni_links "
+                               "WHERE admin_id=%s AND joined=0 ORDER BY found_at DESC",
+                               (ADMIN_ID,))
+                if not links_rows:
+                    await cb.message.edit_text(
+                        "❌ لینکی موجود نیست.",
+                        reply_markup=back_kb("ld_menu")
+                    )
+                else:
                     out = "\n".join(r[0] for r in links_rows)
+                    cnt = len(links_rows)
                     if len(out) <= 4000:
-                        await cb.message.edit_text(out, reply_markup=back_kb("ld_menu"))
+                        await cb.message.edit_text(
+                            out, reply_markup=back_kb("ld_show_links")
+                        )
                     else:
                         chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
                         await cb.message.edit_text(
-                            f"🔗 {len(links_rows)} لینک در انتظار جوین:",
-                            reply_markup=back_kb("ld_menu")
+                            f"🔗 {cnt} لینک در انتظار جوین:",
+                            reply_markup=back_kb("ld_show_links")
                         )
                         for chunk in chunks:
                             await client.send_message(ADMIN_ID, chunk)
+
+            elif d == "ld_links_clear":
+                u("DELETE FROM linkdoni_links WHERE admin_id=%s AND joined=0",
+                  (ADMIN_ID,))
+                await cb.message.edit_text(
+                    "✅ لینک‌های دریافتی پاک شدند.",
+                    reply_markup=back_kb("ld_menu")
+                )
 
             elif d == "ld_join_manual":
                 links_rows = q("SELECT link FROM linkdoni_links "
