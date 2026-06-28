@@ -1576,14 +1576,29 @@ def register(app):
                         reply_markup=back_kb("ld_menu")
                     )
                 else:
+                    import json
+                    from handlers.text_handler import _check_duplicate_links
                     links = [r[0] for r in links_rows]
-                    set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
-                    tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name",
-                             (ADMIN_ID,))
-                    tag_list = [t[0] for t in tags]
+                    new_links, dup_links = _check_duplicate_links(links)
+                    set_step(ADMIN_ID, "g_join_dup_check", json.dumps({
+                        "all": links,
+                        "new": new_links,
+                        "dup": dup_links
+                    }))
                     await cb.message.edit_text(
-                        f"✅ **{len(links)} لینک آماده جوین**\n\nبرچسب گروه‌ها را انتخاب کنید:",
-                        reply_markup=tag_select_kb(tag_list, "gjointag", show_all=False)
+                        f"📋 **{len(links)} لینک دریافت شد**\n"
+                        f"✅ جدید: {len(new_links)} لینک\n"
+                        f"🔄 تکراری: {len(dup_links)} لینک (قبلاً استفاده شده)",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton(
+                                f"❌ حذف تکراری‌ها و جوین با {len(new_links)} لینک",
+                                callback_data="gjoin_nodup"
+                            )],
+                            [InlineKeyboardButton(
+                                f"✅ جوین با همه {len(links)} لینک",
+                                callback_data="gjoin_all"
+                            )]
+                        ])
                     )
 
             elif d == "ld_settings":
