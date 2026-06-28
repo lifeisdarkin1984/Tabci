@@ -1,6 +1,9 @@
 import asyncio, re, random, hashlib
 from pyrogram.errors import (FloodWait, AuthKeyUnregistered,
-                              UserDeactivated, SessionExpired)
+                              UserDeactivated, SessionExpired,
+                              ChannelPrivate, ChatForbidden,
+                              UsernameNotOccupied, UsernameInvalid,
+                              PeerIdInvalid)
 from database import q, u
 from utils import get_user_client, ADMIN_ID
 
@@ -10,7 +13,8 @@ LINK_PATTERN = re.compile(r'https?://t\.me/[^\s\]\)"\']+')
 
 
 def _normalize_link(link: str) -> str:
-    link = link.strip().lower().split("?")[0].rstrip("/")
+    # فقط query string و slash آخر رو حذف کن — lowercase نزن چون invite hash حساسه
+    link = link.strip().split("?")[0].rstrip("/")
     return link
 
 
@@ -32,6 +36,33 @@ def _get_settings():
             "join_tag": r[0][4] or "", "last_auto_scan": r[0][5]}
 
 
+async def _get_history(uc, target, limit=500):
+    """
+    تاریخچه یه کانال/گروه رو می‌گیره.
+    خروجی: لیست پیام‌ها یا None اگه دسترسی نداشت.
+    """
+    msgs = []
+    try:
+        async for msg in uc.get_chat_history(target, limit=limit):
+            msgs.append(msg)
+        return msgs
+    except (ChannelPrivate, ChatForbidden, UsernameNotOccupied,
+            UsernameInvalid, PeerIdInvalid):
+        return None
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        # یه بار دیگه امتحان کن
+        try:
+            msgs = []
+            async for msg in uc.get_chat_history(target, limit=limit):
+                msgs.append(msg)
+            return msgs
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
 async def scan_linkdonis(triggered_by="auto"):
     """
     اسکن همه لینکدونی‌های فعال و استخراج لینک‌های جدید.
@@ -44,119 +75,135 @@ async def scan_linkdonis(triggered_by="auto"):
     if not sources:
         return 0, 0, []
 
-    # انتخاب یه اکانت رندوم برای اسکن
     accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
              (ADMIN_ID,))
     if not accs:
         return 0, 0, []
-    acc_id = str(random.choice(accs)[0])
 
-    uc = await get_user_client(acc_id)
-    if not uc:
+    # همه اکانت‌ها رو یه بار start می‌کنیم
+    acc_ids = [str(r[0]) for r in accs]
+    random.shuffle(acc_ids)
+
+    clients = {}
+    for acc_id in acc_ids:
+        uc = await get_user_client(acc_id)
+        if not uc:
+            continue
+        try:
+            await uc.start()
+            clients[acc_id] = uc
+        except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
+            print(f"[Linkdoni] اکانت {acc_id} منقضی.")
+        except Exception as e:
+            print(f"[Linkdoni] خطا در start اکانت {acc_id}: {e}")
+
+    if not clients:
         return 0, 0, []
 
     total_found = 0
     new_count = 0
     all_new_links = []
 
-    try:
-        await uc.start()
-
-        for src_id, chat_id, chat_title, last_msg_id in sources:
+    for src_id, chat_id, chat_title, last_msg_id in sources:
+        try:
             try:
-                # تبدیل chat_id به عدد اگه ممکنه
-                try:
-                    target = int(chat_id)
-                except ValueError:
-                    target = chat_id
+                target = int(chat_id)
+            except ValueError:
+                target = chat_id
 
-                new_last_id = last_msg_id
-                batch_links = []
+            # امتحان اکانت‌ها تا یکی جواب بده
+            raw_msgs = None
+            for acc_id, uc in clients.items():
+                raw_msgs = await _get_history(uc, target, limit=500)
+                if raw_msgs is not None:
+                    break
 
-                # فقط پیام‌های جدیدتر از last_message_id بخون
-                async for msg in uc.get_chat_history(target, limit=500):
-                    if msg.id <= last_msg_id:
-                        break
-                    if msg.id > new_last_id:
-                        new_last_id = msg.id
+            if raw_msgs is None:
+                print(f"[Linkdoni] هیچ اکانتی به {chat_id} دسترسی نداشت.")
+                continue
 
-                    # استخراج لینک از متن، caption، entities، دکمه‌ها
-                    texts = [msg.text or "", msg.caption or ""]
-                    for e in (msg.entities or []) + (msg.caption_entities or []):
+            new_last_id = last_msg_id
+            raw_links = []
+
+            for msg in raw_msgs:
+                if msg.id <= last_msg_id:
+                    continue
+                if msg.id > new_last_id:
+                    new_last_id = msg.id
+
+                # ۱. متن پیام
+                txt = (msg.text or "") + " " + (msg.caption or "")
+                raw_links += LINK_PATTERN.findall(txt)
+
+                # ۲. entities (لینک‌های کلیک‌پذیر داخل متن)
+                for entities in [msg.entities or [], msg.caption_entities or []]:
+                    for e in entities:
                         if hasattr(e, 'url') and e.url:
-                            texts.append(e.url)
-                    if msg.reply_markup:
-                        try:
-                            rows = getattr(msg.reply_markup,
-                                           'inline_keyboard', None)
-                            if rows:
-                                for row in rows:
-                                    for btn in row:
-                                        if getattr(btn, 'url', None):
-                                            texts.append(btn.url)
-                        except Exception:
-                            pass
+                            raw_links += LINK_PATTERN.findall(e.url)
 
-                    for t in texts:
-                        for lnk in LINK_PATTERN.findall(t):
-                            lnk = lnk.rstrip('.,;:!?)\'"')
-                            if 't.me/' in lnk:
-                                batch_links.append(lnk)
-
-                total_found += len(batch_links)
-
-                # فیلتر تکراری با used_links و linkdoni_links
-                for lnk in batch_links:
-                    norm = _normalize_link(lnk)
-                    h = _link_hash(lnk)
-
-                    # چک used_links (قبلاً جوین شده)
-                    r1 = q("SELECT 1 FROM used_links WHERE admin_id=%s "
-                           "AND link_hash=%s", (ADMIN_ID, h))
-                    if r1:
-                        continue
-
-                    # چک linkdoni_links (قبلاً دریافت شده)
-                    r2 = q("SELECT 1 FROM linkdoni_links WHERE admin_id=%s "
-                           "AND link_hash=%s", (ADMIN_ID, h))
-                    if r2:
-                        continue
-
-                    # لینک جدیده — ذخیره کن
+                # ۳. دکمه‌های inline
+                if msg.reply_markup:
                     try:
-                        u("INSERT IGNORE INTO linkdoni_links "
-                          "(admin_id, link, link_hash, source_id) "
-                          "VALUES (%s,%s,%s,%s)",
-                          (ADMIN_ID, norm[:500], h, src_id))
-                        all_new_links.append(norm)
-                        new_count += 1
+                        rows = getattr(msg.reply_markup, 'inline_keyboard', None)
+                        if rows:
+                            for row in rows:
+                                for btn in row:
+                                    url = getattr(btn, 'url', None)
+                                    if url:
+                                        raw_links += LINK_PATTERN.findall(url)
                     except Exception:
                         pass
 
-                # آپدیت last_message_id و last_scan
-                if new_last_id > last_msg_id:
-                    u("UPDATE linkdoni_sources SET last_message_id=%s, "
-                      "last_scan=NOW() WHERE id=%s",
-                      (new_last_id, src_id))
+                # ۴. web preview
+                if msg.web_page and hasattr(msg.web_page, 'url') and msg.web_page.url:
+                    raw_links += LINK_PATTERN.findall(msg.web_page.url)
 
-                await asyncio.sleep(2)
+            # پاکسازی: حذف کاراکترهای اضافی از انتها + فیلتر t.me + حذف تکراری
+            batch_links = []
+            for lnk in raw_links:
+                lnk = lnk.rstrip('.,;:!?)\'"')
+                if 't.me/' in lnk and lnk not in batch_links:
+                    batch_links.append(lnk)
 
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-            except Exception as ex:
-                print(f"[Linkdoni] خطا در اسکن {chat_id}: {ex}")
-                continue
+            total_found += len(batch_links)
 
-        await uc.stop()
+            # فیلتر تکراری با used_links و linkdoni_links
+            for lnk in batch_links:
+                norm = _normalize_link(lnk)
+                h = _link_hash(lnk)
 
-    except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
-        print(f"[Linkdoni] اکانت {acc_id} منقضی.")
-        try:
-            await uc.stop()
-        except Exception:
-            pass
-    except Exception as e:
-        print(f"[Linkdoni] خطای کلی اسکن: {e}")
+                r1 = q("SELECT 1 FROM used_links WHERE admin_id=%s AND link_hash=%s",
+                       (ADMIN_ID, h))
+                if r1:
+                    continue
+
+                r2 = q("SELECT 1 FROM linkdoni_links WHERE admin_id=%s AND link_hash=%s",
+                       (ADMIN_ID, h))
+                if r2:
+                    continue
+
+                try:
+                    u("INSERT IGNORE INTO linkdoni_links "
+                      "(admin_id, link, link_hash, source_id) VALUES (%s,%s,%s,%s)",
+                      (ADMIN_ID, norm[:500], h, src_id))
+                    all_new_links.append(norm)
+                    new_count += 1
+                except Exception:
+                    pass
+
+            # آپدیت last_message_id و last_scan
+            if new_last_id > last_msg_id:
+                u("UPDATE linkdoni_sources SET last_message_id=%s, last_scan=NOW() WHERE id=%s",
+                  (new_last_id, src_id))
+
+            await asyncio.sleep(2)
+
+        except Exception as ex:
+            print(f"[Linkdoni] خطا در اسکن {chat_id}: {ex}")
+            continue
+
+    # stop همه اکانت‌ها
+    for uc in clients.values():
         try:
             await uc.stop()
         except Exception:
@@ -185,7 +232,7 @@ async def run():
                       "WHERE admin_id=%s", (ADMIN_ID,))
                     total, new_count, links = await scan_linkdonis("auto")
 
-                    # گزارش به ادمین — اسکن خودکار فقط گزارش می‌ده، جوین نمی‌کنه
+                    # اسکن خودکار فقط گزارش می‌ده، جوین نمی‌کنه
                     if BOT_CLIENT:
                         try:
                             await BOT_CLIENT.send_message(
