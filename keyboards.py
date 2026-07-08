@@ -37,7 +37,7 @@ def manage_kb(acc_id):
          InlineKeyboardButton("😀 ری‌اکت رندم",     callback_data=f"m_react_{acc_id}")],
         [InlineKeyboardButton("🔗 استخراج لینک",    callback_data=f"m_ext_{acc_id}"),
          InlineKeyboardButton("👥 لیست گروه‌ها",   callback_data=f"m_grps_{acc_id}")],
-        [InlineKeyboardButton("🗑 حذف پیوی‌ها",     callback_data=f"m_delpv_{acc_id}"),
+        [InlineKeyboardButton("🗑 حذف",             callback_data=f"m_del_menu_{acc_id}"),
          InlineKeyboardButton("➕ عضو شدن لینک‌ها", callback_data=f"m_join_{acc_id}")],
         [InlineKeyboardButton("🕵️ عضویت اجبار",     callback_data=f"m_fj_{acc_id}"),
          InlineKeyboardButton("🚫 خروج خودکار محدود", callback_data=f"m_autoleave_{acc_id}")],
@@ -51,10 +51,21 @@ def manage_kb(acc_id):
         [InlineKeyboardButton("🔙 بازگشت",           callback_data=f"acc_sel_{acc_id}")],
     ])
 
+# ─── منوی حذف (تک‌اکانت) ─────────────────────────────────────
+def del_menu_kb(acc_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 حذف پی‌وی‌ها",  callback_data=f"m_delpv_{acc_id}"),
+         InlineKeyboardButton("👥 حذف گروه‌ها",   callback_data=f"m_delgrp_{acc_id}")],
+        [InlineKeyboardButton("🤖 حذف ربات‌ها",   callback_data=f"m_delbot_{acc_id}"),
+         InlineKeyboardButton("📢 حذف کانال‌ها",  callback_data=f"m_delchannel_{acc_id}")],
+        [InlineKeyboardButton("🔙 بازگشت",         callback_data=f"acc_manage_{acc_id}")],
+    ])
+
 # ─── منوی همگانی ────────────────────────────────────────────
 def global_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🛑 توقف تمام عملیات", callback_data="g_stopall")],
+        [InlineKeyboardButton("🗑 حذف",                     callback_data="g_del_menu")],
         [InlineKeyboardButton("⏰ ارسال زمان‌دار",          callback_data="g_sch_menu"),
          InlineKeyboardButton("➕ عضو شدن گروه‌ها",        callback_data="g_join")],
         [InlineKeyboardButton("🕵️ عضویت اجبار",            callback_data="g_fj"),
@@ -74,6 +85,16 @@ def global_kb():
         [InlineKeyboardButton("📥 جوین از پیوی‌ها", callback_data="g_pvjoin")],
         [InlineKeyboardButton("📡 لینکدونی هوشمند", callback_data="ld_menu")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
+    ])
+
+# ─── منوی حذف همگانی ───────────────────────────────────────
+def global_del_menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 حذف پی‌وی‌ها",  callback_data="g_delpv"),
+         InlineKeyboardButton("👥 حذف گروه‌ها",   callback_data="g_delgrp")],
+        [InlineKeyboardButton("🤖 حذف ربات‌ها",   callback_data="g_delbot"),
+         InlineKeyboardButton("📢 حذف کانال‌ها",  callback_data="g_delchannel")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
     ])
 
 # ─── منشی خودکار ────────────────────────────────────────────
