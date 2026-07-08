@@ -47,19 +47,21 @@ def save_account(me, session_string, phone):
 
 async def clear_chat_history(uc, chat_id, revoke=False):
     """
-    حذف گفتگو (تاریخچه پیام‌ها) با یک چت (پیوی/ربات).
-    توجه: پایروگرام متد delete_history ندارد (فقط raw API messages.DeleteHistory
-    و بات‌متد delete_messages وجود دارد)، پس پیام‌ها را می‌خوانیم و دسته‌دسته
-    با delete_messages حذف می‌کنیم.
-    revoke=False (پیش‌فرض) → فقط سمت خودمان پاک می‌شود، طرف مقابل تاریخچه‌اش دست‌نخورده می‌ماند.
-    revoke=True → دوطرفه پاک می‌شود (برای پیوی معمولی).
+    حذف کامل گفتگو با یک چت (پیوی/ربات) — هم پیام‌ها هم خودِ چت از لیست مکالمات.
+    توجه: پایروگرام متد delete_history ندارد؛ delete_messages فقط پیام‌ها را
+    پاک می‌کند ولی چت خالی را در لیست نگه می‌دارد (همون چیزی که به‌صورت
+    «تاریخچه پاک شد» دیده می‌شه). برای حذف واقعی خودِ گفتگو از raw API
+    messages.DeleteHistory با just_clear=False استفاده می‌کنیم.
+    revoke=False (پیش‌فرض) → فقط سمت خودمان حذف می‌شود، طرف مقابل چیزی نمی‌بیند.
+    revoke=True → دوطرفه حذف می‌شود.
     """
-    msg_ids = []
-    async for msg in uc.get_chat_history(chat_id):
-        msg_ids.append(msg.id)
-    for i in range(0, len(msg_ids), 100):
-        await uc.delete_messages(chat_id, msg_ids[i:i + 100], revoke=revoke)
-    return len(msg_ids)
+    from pyrogram import raw
+    peer = await uc.resolve_peer(chat_id)
+    await uc.invoke(
+        raw.functions.messages.DeleteHistory(
+            peer=peer, max_id=0, just_clear=False, revoke=revoke
+        )
+    )
 
 # ─── توقف عملیات ──────────────────────────────
 stop_all = False
