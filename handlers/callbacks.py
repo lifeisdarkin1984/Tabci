@@ -3,7 +3,8 @@ from pyrogram import filters
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
-                   clear_step, get_user_client, is_stopped, set_stop)
+                   clear_step, get_user_client, is_stopped, set_stop,
+                   clear_chat_history)
 from keyboards import *
 import workers.reply_worker as rw
 import workers.react_worker as rcw
@@ -28,6 +29,79 @@ def register(app):
 
             elif d == "menu_global":
                 await cb.message.edit_text("🌐 **مدیریت همگانی**", reply_markup=global_kb())
+
+            # ══ منوی حذف همگانی ══
+            elif d == "g_del_menu":
+                await cb.message.edit_text("🗑 **حذف همگانی**\n\nچه چیزی حذف بشه؟", reply_markup=global_del_menu_kb())
+
+            elif d == "g_delpv":
+                await cb.message.edit_text("⚠️ حذف **تمام پیوی‌ها** در همه اکانت‌ها؟",
+                                            reply_markup=confirm_kb("g_delpv_yes", "g_del_menu"))
+
+            elif d == "g_delpv_yes":
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                set_stop(False)
+                await cb.message.edit_text(f"⏳ حذف پیوی‌ها برای {len(accs)} اکانت شروع شد...")
+                for (aid,) in accs:
+                    t = asyncio.create_task(_delete_pvs_task(client, aid)); t.set_name("del_pv_task")
+
+            elif d == "g_delbot":
+                await cb.message.edit_text("⚠️ حذف **تمام گفتگو با ربات‌ها** در همه اکانت‌ها؟",
+                                            reply_markup=confirm_kb("g_delbot_yes", "g_del_menu"))
+
+            elif d == "g_delbot_yes":
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                set_stop(False)
+                await cb.message.edit_text(f"⏳ حذف ربات‌ها برای {len(accs)} اکانت شروع شد...")
+                for (aid,) in accs:
+                    t = asyncio.create_task(_delete_bots_task(client, aid)); t.set_name("del_bot_task")
+
+            elif d == "g_delchannel":
+                await cb.message.edit_text("⚠️ خروج از **تمام کانال‌ها** در همه اکانت‌ها؟",
+                                            reply_markup=confirm_kb("g_delchannel_yes", "g_del_menu"))
+
+            elif d == "g_delchannel_yes":
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                set_stop(False)
+                await cb.message.edit_text(f"⏳ خروج از کانال‌ها برای {len(accs)} اکانت شروع شد...")
+                for (aid,) in accs:
+                    t = asyncio.create_task(_delete_channels_task(client, aid)); t.set_name("del_channel_task")
+
+            elif d == "g_delgrp":
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                if not tag_list:
+                    await cb.message.edit_text(
+                        "⚠️ خروج از **تمام گروه‌ها** در همه اکانت‌ها؟",
+                        reply_markup=confirm_kb("gdelgrp_yes_ALL_ALL", "g_del_menu"))
+                    return
+                await cb.message.edit_text("👤 حذف گروه‌های کدوم اکانت‌ها؟",
+                                            reply_markup=tag_select_kb(tag_list, "gdelgrpatag"))
+
+            elif d.startswith("gdelgrpatag_tag_"):
+                acc_tag = d[16:]
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                await cb.message.edit_text("👥 حذف کدوم گروه‌ها؟",
+                                            reply_markup=tag_select_kb(tag_list, f"gdelgrpgtag_{acc_tag}"))
+
+            elif d.startswith("gdelgrpgtag_"):
+                rest = d[12:]  # {acc_tag}_tag_{group_tag}
+                acc_tag, _, group_tag = rest.partition("_tag_")
+                await cb.message.edit_text(
+                    f"⚠️ خروج از گروه‌های منطبق [👤 {acc_tag} | 👥 {group_tag}]؟\nمطمئنید؟",
+                    reply_markup=confirm_kb(f"gdelgrp_yes_{acc_tag}_{group_tag}", "g_del_menu"))
+
+            elif d.startswith("gdelgrp_yes_"):
+                rest = d[12:]  # {acc_tag}_{group_tag}
+                acc_tag, _, group_tag = rest.partition("_")
+                from handlers.text_handler import get_filtered_accounts
+                accs = get_filtered_accounts(acc_tag)
+                set_stop(False)
+                await cb.message.edit_text(f"⏳ خروج از گروه‌ها برای {len(accs)} اکانت شروع شد...")
+                for (aid,) in accs:
+                    t = asyncio.create_task(_delete_groups_task(client, aid, group_tag_filter=group_tag))
+                    t.set_name("del_grp_task")
 
             # ══ توقف تمام عملیات ══
             elif d == "g_stopall":
@@ -371,7 +445,7 @@ def register(app):
                 async for dlg in uc.get_dialogs():
                     if dlg.chat.type == en.ChatType.PRIVATE:
                         try:
-                            await uc.delete_history(dlg.chat.id, revoke=True); count += 1
+                            await clear_chat_history(uc, dlg.chat.id); count += 1
                         except Exception: pass
                 await uc.stop()
                 await cb.message.edit_text(f"✅ {count} پیوی حذف شد.", reply_markup=back_kb(f"acc_manage_{acc_id}"))
@@ -380,6 +454,95 @@ def register(app):
                 acc_id = d[8:]
                 await cb.message.edit_text("🗑 حذف همه پیوی‌ها؟",
                                             reply_markup=confirm_kb(f"delpv_yes_{acc_id}", f"acc_manage_{acc_id}"))
+
+            # ══ منوی حذف (تک‌اکانت) ══
+            elif d.startswith("m_del_menu_"):
+                acc_id = d[11:]
+                await cb.message.edit_text("🗑 **حذف**\n\nچه چیزی حذف بشه؟", reply_markup=del_menu_kb(acc_id))
+
+            # ══ حذف گروه‌ها (تک‌اکانت) ══
+            elif d.startswith("m_delgrp_"):
+                acc_id = d[9:]
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                if not tag_list:
+                    await cb.message.edit_text(
+                        "⚠️ خروج از **تمام گروه‌های** این اکانت؟",
+                        reply_markup=confirm_kb(f"delgrp_yes_{acc_id}_ALL", f"acc_manage_{acc_id}"))
+                    return
+                await cb.message.edit_text("👥 حذف کدوم گروه‌ها؟",
+                                            reply_markup=tag_select_kb(tag_list, f"delgrptag_{acc_id}"))
+
+            elif d.startswith("delgrptag_"):
+                rest = d[10:]  # {acc_id}_tag_{group_tag}
+                acc_id, _, group_tag = rest.partition("_tag_")
+                tag_lbl = "بدون برچسب" if group_tag == "NOTAG" else ("همه گروه‌ها" if group_tag == "ALL" else f"«{group_tag}»")
+                await cb.message.edit_text(
+                    f"⚠️ خروج از گروه‌های {tag_lbl}؟",
+                    reply_markup=confirm_kb(f"delgrp_yes_{acc_id}_{group_tag}", f"acc_manage_{acc_id}"))
+
+            elif d.startswith("delgrp_yes_"):
+                rest = d[11:]  # {acc_id}_{group_tag}
+                acc_id, _, group_tag = rest.partition("_")
+                uc = await get_user_client(acc_id)
+                if not uc:
+                    await cb.answer("❌ در دسترس نیست", show_alert=True); return
+                from pyrogram import enums as en
+                from handlers.text_handler import get_filtered_chat_ids, _chat_allowed
+                filter_result = get_filtered_chat_ids(acc_id, group_tag)
+                count = 0
+                await uc.start()
+                async for dlg in uc.get_dialogs():
+                    if dlg.chat.type in (en.ChatType.GROUP, en.ChatType.SUPERGROUP) and _chat_allowed(dlg.chat.id, filter_result):
+                        try:
+                            await uc.leave_chat(dlg.chat.id); count += 1; await asyncio.sleep(0.5)
+                        except Exception: pass
+                await uc.stop()
+                await cb.message.edit_text(f"✅ از {count} گروه خارج شد.", reply_markup=back_kb(f"acc_manage_{acc_id}"))
+
+            # ══ حذف ربات‌ها (تک‌اکانت) ══
+            elif d.startswith("m_delbot_"):
+                acc_id = d[9:]
+                await cb.message.edit_text("🗑 حذف همه گفتگو با ربات‌ها؟",
+                                            reply_markup=confirm_kb(f"delbot_yes_{acc_id}", f"acc_manage_{acc_id}"))
+
+            elif d.startswith("delbot_yes_"):
+                acc_id = d[11:]
+                uc = await get_user_client(acc_id)
+                if not uc:
+                    await cb.answer("❌ در دسترس نیست", show_alert=True); return
+                from pyrogram import enums as en
+                count = 0
+                await uc.start()
+                async for dlg in uc.get_dialogs():
+                    if dlg.chat.type == en.ChatType.BOT:
+                        try:
+                            await clear_chat_history(uc, dlg.chat.id); count += 1
+                        except Exception: pass
+                await uc.stop()
+                await cb.message.edit_text(f"✅ {count} گفتگو با ربات حذف شد.", reply_markup=back_kb(f"acc_manage_{acc_id}"))
+
+            # ══ حذف کانال‌ها (تک‌اکانت) ══
+            elif d.startswith("m_delchannel_"):
+                acc_id = d[13:]
+                await cb.message.edit_text("🗑 خروج از همه کانال‌ها؟",
+                                            reply_markup=confirm_kb(f"delchannel_yes_{acc_id}", f"acc_manage_{acc_id}"))
+
+            elif d.startswith("delchannel_yes_"):
+                acc_id = d[15:]
+                uc = await get_user_client(acc_id)
+                if not uc:
+                    await cb.answer("❌ در دسترس نیست", show_alert=True); return
+                from pyrogram import enums as en
+                count = 0
+                await uc.start()
+                async for dlg in uc.get_dialogs():
+                    if dlg.chat.type == en.ChatType.CHANNEL:
+                        try:
+                            await uc.leave_chat(dlg.chat.id); count += 1; await asyncio.sleep(0.5)
+                        except Exception: pass
+                await uc.stop()
+                await cb.message.edit_text(f"✅ از {count} کانال خارج شد.", reply_markup=back_kb(f"acc_manage_{acc_id}"))
 
             # ══ عضویت در لینک‌ها ══
             elif d.startswith("join_go_"):
@@ -1795,6 +1958,130 @@ async def _send_to_groups_task(bot_client, acc_id, text, group_tag_filter="ALL")
         f"🚪 از گروه‌های محدود خارج شد: {result['left']}"
     )
     await bot_client.send_message(ADMIN_ID, report)
+
+
+async def _delete_pvs_task(bot_client, acc_id):
+    """حذف تمام پیوی‌های یک اکانت — تسک همگانی"""
+    from pyrogram import enums as en
+    uc = await get_user_client(acc_id)
+    if not uc:
+        return
+    me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
+    display = me_info[0][0] if me_info else acc_id
+    count = 0
+    try:
+        await uc.start()
+    except Exception as e:
+        await bot_client.send_message(ADMIN_ID, f"❌ اتصال اکانت {display} ناموفق: {e}")
+        return
+    try:
+        async for dlg in uc.get_dialogs():
+            if dlg.chat.type == en.ChatType.PRIVATE:
+                try:
+                    await clear_chat_history(uc, dlg.chat.id); count += 1
+                except Exception: pass
+    except Exception as e:
+        await bot_client.send_message(ADMIN_ID, f"❌ خطا در خواندن پیوی‌های {display}: {e}")
+    try:
+        await uc.stop()
+    except Exception:
+        pass
+    await bot_client.send_message(ADMIN_ID, f"✅ حذف پیوی‌ها\n👤 {display}\n🗑 حذف‌شده: {count}")
+
+
+async def _delete_bots_task(bot_client, acc_id):
+    """حذف تمام گفتگو با ربات‌های یک اکانت — تسک همگانی"""
+    from pyrogram import enums as en
+    uc = await get_user_client(acc_id)
+    if not uc:
+        return
+    me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
+    display = me_info[0][0] if me_info else acc_id
+    count = 0
+    try:
+        await uc.start()
+    except Exception as e:
+        await bot_client.send_message(ADMIN_ID, f"❌ اتصال اکانت {display} ناموفق: {e}")
+        return
+    try:
+        async for dlg in uc.get_dialogs():
+            if dlg.chat.type == en.ChatType.BOT:
+                try:
+                    await clear_chat_history(uc, dlg.chat.id); count += 1
+                except Exception: pass
+    except Exception as e:
+        await bot_client.send_message(ADMIN_ID, f"❌ خطا در خواندن ربات‌های {display}: {e}")
+    try:
+        await uc.stop()
+    except Exception:
+        pass
+    await bot_client.send_message(ADMIN_ID, f"✅ حذف ربات‌ها\n👤 {display}\n🗑 حذف‌شده: {count}")
+
+
+async def _delete_channels_task(bot_client, acc_id):
+    """خروج از تمام کانال‌های یک اکانت — تسک همگانی"""
+    from pyrogram import enums as en
+    uc = await get_user_client(acc_id)
+    if not uc:
+        return
+    me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
+    display = me_info[0][0] if me_info else acc_id
+    count = 0
+    try:
+        await uc.start()
+    except Exception as e:
+        await bot_client.send_message(ADMIN_ID, f"❌ اتصال اکانت {display} ناموفق: {e}")
+        return
+    try:
+        async for dlg in uc.get_dialogs():
+            if dlg.chat.type == en.ChatType.CHANNEL:
+                try:
+                    await uc.leave_chat(dlg.chat.id); count += 1
+                    await asyncio.sleep(0.5)
+                except Exception: pass
+    except Exception as e:
+        await bot_client.send_message(ADMIN_ID, f"❌ خطا در خواندن کانال‌های {display}: {e}")
+    try:
+        await uc.stop()
+    except Exception:
+        pass
+    await bot_client.send_message(ADMIN_ID, f"✅ خروج از کانال‌ها\n👤 {display}\n🚪 خارج‌شده: {count}")
+
+
+async def _delete_groups_task(bot_client, acc_id, group_tag_filter="ALL"):
+    """خروج از گروه‌های یک اکانت با فیلتر برچسب — تسک همگانی"""
+    from pyrogram import enums as en
+    from handlers.text_handler import get_filtered_chat_ids, _chat_allowed
+    uc = await get_user_client(acc_id)
+    if not uc:
+        return
+    me_info = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
+    display = me_info[0][0] if me_info else acc_id
+    filter_result = get_filtered_chat_ids(acc_id, group_tag_filter)
+    count = 0
+    try:
+        await uc.start()
+    except Exception as e:
+        await bot_client.send_message(ADMIN_ID, f"❌ اتصال اکانت {display} ناموفق: {e}")
+        return
+    try:
+        async for dlg in uc.get_dialogs():
+            if dlg.chat.type not in (en.ChatType.GROUP, en.ChatType.SUPERGROUP):
+                continue
+            if not _chat_allowed(dlg.chat.id, filter_result):
+                continue
+            try:
+                await uc.leave_chat(dlg.chat.id); count += 1
+                await asyncio.sleep(0.5)
+            except Exception: pass
+    except Exception as e:
+        await bot_client.send_message(ADMIN_ID, f"❌ خطا در خواندن گروه‌های {display}: {e}")
+    try:
+        await uc.stop()
+    except Exception:
+        pass
+    tag_lbl = f" [🏷 {group_tag_filter}]" if group_tag_filter not in ("ALL", "") else ""
+    await bot_client.send_message(ADMIN_ID, f"✅ حذف گروه‌ها{tag_lbl}\n👤 {display}\n🚪 خارج‌شده: {count}")
 
 
 async def _scan_pvs_for_links(bot_client):
