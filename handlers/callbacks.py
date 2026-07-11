@@ -316,8 +316,8 @@ def register(app):
                     active = row[0][0] if row else 0
                     await cb.message.edit_text("👽 پنل منشی:", reply_markup=secretary_kb(acc_id, active))
                 elif ctx == "g_secretary":
-                    row = q("SELECT COUNT(*) FROM secretary WHERE is_active=1 AND admin_id=%s", (ADMIN_ID,))
-                    active = (row[0][0] if row else 0) > 0
+                    row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                    active = bool(row[0][0]) if row else False
                     await cb.message.edit_text("🤖 **منشی خودکار همگانی**", reply_markup=global_sec_kb(active))
                 else:
                     row2 = q("SELECT is_active FROM scheduler WHERE account_id=%s", (acc_id,))
