@@ -1360,7 +1360,14 @@ def register(app):
                 await cb.message.edit_text(txt, reply_markup=tags_list_kb(tag_list, "groups"))
 
             elif d == "tags_accounts":
-                accs = q("SELECT id,name,phone,tag FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                accs = q(
+                    "SELECT a.id, a.name, a.phone, "
+                    "GROUP_CONCAT(at.tag_name ORDER BY at.tag_name SEPARATOR ', ') "
+                    "FROM accounts a "
+                    "LEFT JOIN account_tags at ON at.account_id=a.id AND at.admin_id=a.admin_id "
+                    "WHERE a.admin_id=%s GROUP BY a.id, a.name, a.phone",
+                    (ADMIN_ID,)
+                )
                 txt = "👤 **برچسب اکانت‌ها**\n\n"
                 for a in accs:
                     tag_str = f"🏷 {a[3]}" if a[3] else "بدون برچسب"
@@ -1381,6 +1388,9 @@ def register(app):
                 # حذف از گروه‌ها هم
                 u("UPDATE group_tags SET tag_name='' WHERE admin_id=%s AND tag_name=%s",
                   (ADMIN_ID, tag_name))
+                # حذف از اکانت‌ها هم
+                u("DELETE FROM account_tags WHERE admin_id=%s AND tag_name=%s",
+                  (ADMIN_ID, tag_name))
                 await cb.answer(f"✅ برچسب «{tag_name}» حذف شد", show_alert=True)
                 tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
@@ -1388,32 +1398,36 @@ def register(app):
 
             elif d.startswith("acctag_sel_"):
                 acc_id = d[11:]
-                acc = q("SELECT name,phone,tag FROM accounts WHERE id=%s", (acc_id,))
+                acc = q("SELECT name,phone FROM accounts WHERE id=%s", (acc_id,))
                 if not acc:
                     await cb.answer("اکانت یافت نشد", show_alert=True); return
                 tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
-                txt = f"👤 **{acc[0][0]}** | {acc[0][1]}\n"
-                txt += f"برچسب فعلی: {acc[0][2] or 'بدون برچسب'}\n\nبرچسب جدید را انتخاب کنید:"
-                rows = [[InlineKeyboardButton(f"🏷 {t}", callback_data=f"acctag_set_{acc_id}_{t}")]
-                        for t in tag_list]
-                rows.append([InlineKeyboardButton("🔘 بدون برچسب", callback_data=f"acctag_set_{acc_id}_NOTAG")])
-                rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="tags_accounts")])
-                await cb.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(rows))
+                if not tag_list:
+                    await cb.answer("ابتدا یک برچسب بسازید (مدیریت برچسب‌ها)", show_alert=True)
+                    return
+                cur = q("SELECT tag_name FROM account_tags WHERE admin_id=%s AND account_id=%s",
+                        (ADMIN_ID, acc_id))
+                cur_tags = [c[0] for c in cur]
+                txt = f"👤 **{acc[0][0]}** | {acc[0][1]}\n\nبرچسب‌ها را انتخاب کنید (چند مورد مجاز است):"
+                await cb.message.edit_text(txt, reply_markup=account_tag_multi_kb(acc_id, tag_list, cur_tags))
 
-            elif d.startswith("acctag_set_"):
+            elif d.startswith("acctagm_tog_"):
                 _, _, acc_id, tag_name = d.split("_", 3)
-                new_tag = "" if tag_name == "NOTAG" else tag_name
-                u("UPDATE accounts SET tag=%s WHERE id=%s AND admin_id=%s",
-                  (new_tag, acc_id, ADMIN_ID))
-                lbl = f"«{new_tag}»" if new_tag else "بدون برچسب"
-                await cb.answer(f"✅ برچسب اکانت به {lbl} تغییر کرد", show_alert=True)
-                accs = q("SELECT id,name,phone,tag FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
-                txt = "👤 **برچسب اکانت‌ها**\n\n"
-                for a in accs:
-                    tag_str = f"🏷 {a[3]}" if a[3] else "بدون برچسب"
-                    txt += f"👤 {a[1]} | {a[2]} — {tag_str}\n"
-                await cb.message.edit_text(txt, reply_markup=account_tag_kb(accs))
+                exists = q("SELECT id FROM account_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
+                           (ADMIN_ID, acc_id, tag_name))
+                if exists:
+                    u("DELETE FROM account_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
+                      (ADMIN_ID, acc_id, tag_name))
+                else:
+                    u("INSERT IGNORE INTO account_tags (admin_id,account_id,tag_name) VALUES (%s,%s,%s)",
+                      (ADMIN_ID, acc_id, tag_name))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                cur = q("SELECT tag_name FROM account_tags WHERE admin_id=%s AND account_id=%s",
+                        (ADMIN_ID, acc_id))
+                cur_tags = [c[0] for c in cur]
+                await cb.message.edit_reply_markup(account_tag_multi_kb(acc_id, tag_list, cur_tags))
 
             elif d == "g_sec":
                 row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
@@ -1652,10 +1666,27 @@ def register(app):
             elif d == "ld_add_source":
                 set_step(ADMIN_ID, "ld_add_source")
                 await cb.message.edit_text(
-                    "➕ **لینک یا یوزرنیم لینکدونی را وارد کنید:**\n"
-                    "(مثال: @linkdoni یا https://t.me/linkdoni)",
+                    "➕ **لینک یا یوزرنیم لینکدونی‌ها را وارد کنید:**\n"
+                    "هر لینکدونی در یک خط — می‌توانید چند مورد را یکجا ارسال کنید.\n\n"
+                    "مثال:\n`@linkdoni1`\n`https://t.me/linkdoni2`",
                     reply_markup=back_kb("ld_sources")
                 )
+
+            elif d == "ld_src_getall":
+                srcs = q("SELECT chat_title, chat_id, source_link FROM linkdoni_sources "
+                         "WHERE admin_id=%s ORDER BY added_at DESC", (ADMIN_ID,))
+                if not srcs:
+                    await cb.answer("❌ هیچ لینکدونی‌ای ثبت نشده.", show_alert=True)
+                    return
+                lines = [(src_link or title or str(chat_id)) for title, chat_id, src_link in srcs]
+                out = "\n".join(lines)
+                if len(out) <= 4000:
+                    await cb.message.reply(out)
+                else:
+                    chunks = [out[i:i+4000] for i in range(0, len(out), 4000)]
+                    for chunk in chunks:
+                        await cb.message.reply(chunk)
+                await cb.answer("✅ لینک‌ها ارسال شد")
 
             elif d.startswith("ld_src_tog_"):
                 src_id = int(d[11:])

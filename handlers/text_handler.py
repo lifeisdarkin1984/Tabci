@@ -302,73 +302,13 @@ def register(app):
             )
 
         elif step == "ld_add_source":
-            # پارس کردن ورودی
-            raw = text.strip()
-            if raw.startswith("https://t.me/"):
-                chat_input = raw.split("t.me/")[-1].strip("/").split("?")[0]
-            elif raw.startswith("@"):
-                chat_input = raw.lstrip("@")
-            elif raw.lstrip("-").isdigit():
-                chat_input = raw
-            else:
-                chat_input = raw.lstrip("@")
-
-            # گرفتن اطلاعات واقعی با یه اکانت رندوم
-            import random as _random
-            accs_ld = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
-                        (ADMIN_ID,))
-            if not accs_ld:
-                await message.reply("❌ هیچ اکانت فعالی وجود ندارد.",
-                                    reply_markup=back_kb("ld_sources"))
-                clear_step(ADMIN_ID); return
-
-            acc_id_ld = str(_random.choice(accs_ld)[0])
-            uc_ld = await get_user_client(acc_id_ld)
-            if not uc_ld:
-                await message.reply("❌ اکانت در دسترس نیست.",
-                                    reply_markup=back_kb("ld_sources"))
-                clear_step(ADMIN_ID); return
-
-            msg_ld = await message.reply("⏳ در حال دریافت اطلاعات لینکدونی...")
-            try:
-                await uc_ld.start()
-                try:
-                    target_ld = int(chat_input)
-                except ValueError:
-                    target_ld = chat_input
-                chat_info = await uc_ld.get_chat(target_ld)
-                real_id = str(chat_info.id)
-                title = getattr(chat_info, 'title', '') or chat_input
-                await uc_ld.stop()
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                try: await uc_ld.stop()
-                except Exception: pass
-                await msg_ld.edit_text("❌ محدودیت تلگرام. دوباره امتحان کنید.")
-                clear_step(ADMIN_ID); return
-            except Exception:
-                try: await uc_ld.stop()
-                except Exception: pass
-                real_id = chat_input
-                title = chat_input
-
-            try:
-                u("INSERT IGNORE INTO linkdoni_sources "
-                  "(admin_id, chat_id, chat_title) VALUES (%s,%s,%s)",
-                  (ADMIN_ID, real_id, title[:200]))
-                from keyboards import ld_sources_kb
-                srcs = q("SELECT id, chat_id, chat_title, is_active "
-                         "FROM linkdoni_sources WHERE admin_id=%s ORDER BY added_at DESC",
-                         (ADMIN_ID,))
-                src_list = [{"id": r[0], "chat_id": r[1],
-                             "chat_title": r[2], "is_active": r[3]} for r in srcs]
-                await msg_ld.edit_text(
-                    f"✅ لینکدونی **{title}** اضافه شد.",
-                    reply_markup=ld_sources_kb(src_list)
-                )
-            except Exception as ex:
-                await msg_ld.edit_text(f"❌ خطا در ذخیره: {ex}",
-                                       reply_markup=back_kb("ld_sources"))
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            if not lines:
+                await message.reply("❌ هیچ لینکدونی‌ای وارد نشد.")
+                return
+            set_stop(False)
+            await message.reply(f"🚀 افزودن {len(lines)} لینکدونی شروع شد...")
+            asyncio.create_task(_add_linkdoni_sources_bulk(client, lines))
             clear_step(ADMIN_ID)
 
         elif step == "ld_interval":
@@ -635,6 +575,98 @@ async def _profile_action(message, acc_id, action, value):
     except Exception as e:
         await message.reply(f"❌ خطا: {e}", reply_markup=manage_kb(acc_id))
     clear_step(ADMIN_ID)
+
+async def _add_linkdoni_sources_bulk(bot_client, lines):
+    """افزودن دسته‌ای لینکدونی‌ها (مشابه عضویت گروهی)"""
+    import random as _random
+    accs_ld = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+    if not accs_ld:
+        await bot_client.send_message(ADMIN_ID, "❌ هیچ اکانت فعالی وجود ندارد.")
+        return
+
+    acc_id_ld = str(_random.choice(accs_ld)[0])
+    uc_ld = await get_user_client(acc_id_ld)
+    if not uc_ld:
+        await bot_client.send_message(ADMIN_ID, "❌ اکانت در دسترس نیست.")
+        return
+
+    ok, fail = 0, 0
+    try:
+        await uc_ld.start()
+        for i, raw in enumerate(lines, 1):
+            if is_stopped():
+                await bot_client.send_message(ADMIN_ID, "🛑 عملیات توسط کاربر متوقف شد.")
+                break
+
+            raw = raw.strip()
+            if raw.startswith("https://t.me/"):
+                chat_input = raw.split("t.me/")[-1].strip("/").split("?")[0]
+            elif raw.startswith("@"):
+                chat_input = raw.lstrip("@")
+            elif raw.lstrip("-").isdigit():
+                chat_input = raw
+            else:
+                chat_input = raw.lstrip("@")
+
+            try:
+                target_ld = int(chat_input)
+            except ValueError:
+                target_ld = chat_input
+
+            try:
+                chat_info = await uc_ld.get_chat(target_ld)
+                real_id = str(chat_info.id)
+                title = getattr(chat_info, 'title', '') or chat_input
+            except FloodWait as e:
+                await bot_client.send_message(
+                    ADMIN_ID,
+                    f"❗️ محدودیت تلگرام {e.value} ثانیه؛ صبر می‌کند و ادامه می‌دهد..."
+                )
+                await asyncio.sleep(e.value)
+                try:
+                    chat_info = await uc_ld.get_chat(target_ld)
+                    real_id = str(chat_info.id)
+                    title = getattr(chat_info, 'title', '') or chat_input
+                except Exception:
+                    real_id = chat_input
+                    title = chat_input
+            except Exception:
+                real_id = chat_input
+                title = chat_input
+
+            try:
+                u("INSERT IGNORE INTO linkdoni_sources "
+                  "(admin_id, chat_id, chat_title, source_link) VALUES (%s,%s,%s,%s)",
+                  (ADMIN_ID, real_id, title[:200], raw[:300]))
+                ok += 1
+                await bot_client.send_message(ADMIN_ID, f"✅ [{i}/{len(lines)}] افزوده شد: {title}")
+            except Exception as ex:
+                fail += 1
+                await bot_client.send_message(ADMIN_ID, f"❌ [{i}/{len(lines)}] خطا در «{raw}»: {ex}")
+
+        try:
+            await uc_ld.stop()
+        except Exception:
+            pass
+    except Exception as ex:
+        try:
+            await uc_ld.stop()
+        except Exception:
+            pass
+        print(f"[LinkdoniBulkAdd] {ex}")
+
+    from keyboards import ld_sources_kb
+    srcs = q("SELECT id, chat_id, chat_title, is_active "
+             "FROM linkdoni_sources WHERE admin_id=%s ORDER BY added_at DESC",
+             (ADMIN_ID,))
+    src_list = [{"id": r[0], "chat_id": r[1],
+                 "chat_title": r[2], "is_active": r[3]} for r in srcs]
+    await bot_client.send_message(
+        ADMIN_ID,
+        f"📋 **پایان افزودن دسته‌ای لینکدونی‌ها**\n✅ موفق: {ok}\n❌ ناموفق: {fail}",
+        reply_markup=ld_sources_kb(src_list)
+    )
+
 
 async def _extract_links(acc_id, channel, limit):
     uc = await get_user_client(acc_id)
