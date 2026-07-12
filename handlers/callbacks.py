@@ -8,6 +8,7 @@ from utils import (ADMIN_ID, get_step, get_step_data, set_step,
 from keyboards import *
 import workers.reply_worker as rw
 import workers.react_worker as rcw
+import workers.secretary as sec_worker
 
 def register(app):
 
@@ -1435,6 +1436,59 @@ def register(app):
                   "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, new, new))
                 await cb.answer(f"منشی همگانی {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
                 await cb.message.edit_reply_markup(global_sec_kb(bool(new)))
+
+            elif d == "gsec_now":
+                from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
+                await cb.answer("⚡ در حال بررسی و ارسال...", show_alert=False)
+                g_banners = q(
+                    "SELECT text,file_id,file_type FROM banners "
+                    "WHERE admin_id=%s AND context='g_secretary' ORDER BY slot",
+                    (ADMIN_ID,)
+                )
+                if not g_banners:
+                    row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                    active = bool(row[0][0]) if row else False
+                    await cb.message.edit_text("⚠️ هیچ بنری برای منشی همگانی تنظیم نشده.",
+                                                reply_markup=global_sec_kb(active))
+                    return
+                await cb.message.edit_text("🔄 در حال بررسی پی‌وی‌های همه‌ی اکانت‌ها...")
+                accs = q("SELECT id,phone FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                report_lines = []
+                total_new = 0
+                for acc_id, phone in accs:
+                    g_replied_row = q(
+                        "SELECT replied_users FROM secretary WHERE account_id=%s",
+                        (f"g_{acc_id}",)
+                    )
+                    g_replied = set(g_replied_row[0][0].split(",")) if (g_replied_row and g_replied_row[0][0]) else set()
+                    uc = await get_user_client(acc_id)
+                    if not uc:
+                        report_lines.append(f"❌ {phone}: اتصال اکانت ناموفق")
+                        continue
+                    try:
+                        await uc.start()
+                        g_replied, g_new_replied = await sec_worker._reply_to_pvs(uc, acc_id, g_banners, g_replied)
+                        await uc.stop()
+                        u("INSERT INTO secretary (account_id,admin_id,is_active,replied_users) "
+                          "VALUES(%s,%s,0,%s) ON DUPLICATE KEY UPDATE replied_users=%s",
+                          (f"g_{acc_id}", ADMIN_ID, ",".join(g_replied), ",".join(g_replied)))
+                        total_new += len(g_new_replied)
+                        report_lines.append(f"✅ {phone}: {len(g_new_replied)} کاربر جدید")
+                    except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
+                        u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
+                        report_lines.append(f"⚠️ {phone}: منقضی شده")
+                        try: await uc.stop()
+                        except Exception: pass
+                    except Exception as e:
+                        report_lines.append(f"❌ {phone}: خطا ({e})")
+                        try: await uc.stop()
+                        except Exception: pass
+
+                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                active = bool(row[0][0]) if row else False
+                txt = f"⚡ **نتیجه ارسال فوری**\n\nجمعاً به {total_new} کاربر جدید پاسخ داده شد.\n\n"
+                txt += "\n".join(report_lines) if report_lines else "هیچ اکانت فعالی یافت نشد."
+                await cb.message.edit_text(txt, reply_markup=global_sec_kb(active))
 
             elif d == "g_rr":
                 row = q("SELECT is_active,interval_minutes,group_tag_filter,acc_tag_filter FROM reply_rand WHERE account_id='global' AND admin_id=%s", (ADMIN_ID,))
