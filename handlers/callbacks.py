@@ -69,7 +69,7 @@ def register(app):
                     t = asyncio.create_task(_delete_channels_task(client, aid)); t.set_name("del_channel_task")
 
             elif d == "g_delgrp":
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 if not tag_list:
                     await cb.message.edit_text(
@@ -81,7 +81,7 @@ def register(app):
 
             elif d.startswith("gdelgrpatag_tag_"):
                 acc_tag = d[16:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text("👥 حذف کدوم گروه‌ها؟",
                                             reply_markup=tag_select_kb(tag_list, f"gdelgrpgtag_{acc_tag}"))
@@ -464,7 +464,7 @@ def register(app):
             # ══ حذف گروه‌ها (تک‌اکانت) ══
             elif d.startswith("m_delgrp_"):
                 acc_id = d[9:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 if not tag_list:
                     await cb.message.edit_text(
@@ -595,7 +595,7 @@ def register(app):
                     await cb.answer("❌ هیچ لینکی برای جوین وجود ندارد.", show_alert=True)
                     clear_step(ADMIN_ID)
                     return
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 set_step(ADMIN_ID, "g_join_tag", "\n".join(chosen_links))
                 await cb.message.edit_text(
@@ -667,7 +667,7 @@ def register(app):
                 msg_text = get_step_data(ADMIN_ID)
                 # ذخیره متن + acc_id برای مرحله بعد
                 set_step(ADMIN_ID, f"sgrp_gtag_{acc_id}", msg_text)
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "📢 ارسال به کدوم گروه‌ها؟",
@@ -780,7 +780,7 @@ def register(app):
 
             elif d.startswith("rr_gtag_"):
                 acc_id = d[8:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "🏷 فیلتر گروه‌ها برای ریپلای:",
@@ -802,7 +802,7 @@ def register(app):
 
             elif d.startswith("rr_atag_"):
                 acc_id = d[8:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "👤 فیلتر اکانت‌ها برای ریپلای:",
@@ -824,7 +824,7 @@ def register(app):
 
             elif d.startswith("rc_gtag_"):
                 acc_id = d[8:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "🏷 فیلتر گروه‌ها برای ری‌اکت:",
@@ -846,7 +846,7 @@ def register(app):
 
             elif d.startswith("rc_atag_"):
                 acc_id = d[8:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "👤 فیلتر اکانت‌ها برای ری‌اکت:",
@@ -1032,7 +1032,7 @@ def register(app):
 
             elif d == "g_sgrp_go":
                 msg_text = get_step_data(ADMIN_ID)
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 if not tag_list:
                     # هیچ برچسبی تعریف نشده - مستقیم با همه شروع کن
@@ -1057,7 +1057,7 @@ def register(app):
                 msg_text = get_step_data(ADMIN_ID)
                 # ذخیره acc_tag در step_data برای مرحله بعد
                 set_step(ADMIN_ID, f"g_sgrp_gtag_{acc_tag}", msg_text)
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "👥 ارسال به کدوم گروه‌ها؟",
@@ -1212,7 +1212,7 @@ def register(app):
 
             elif d.startswith("gsch_gtag_"):
                 target = d[10:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text("🏷 فیلتر گروه‌ها برای زمان‌بند:",
                     reply_markup=tag_select_kb(tag_list, f"gsch_gtag_set_{target}"))
@@ -1232,7 +1232,7 @@ def register(app):
 
             elif d.startswith("gsch_atag_"):
                 target = d[10:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text("👤 فیلتر اکانت‌ها برای زمان‌بند:",
                     reply_markup=tag_select_kb(tag_list, f"gsch_atag_set_{target}"))
@@ -1350,7 +1350,7 @@ def register(app):
                 )
 
             elif d == "tags_groups":
-                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 txt = "👥 **برچسب گروه‌ها**\n\n"
                 if tag_list:
@@ -1374,6 +1374,16 @@ def register(app):
                     txt += f"👤 {a[1]} | {a[2]} — {tag_str}\n"
                 await cb.message.edit_text(txt, reply_markup=account_tag_kb(accs))
 
+            elif d == "tags_accounts_manage":
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                tag_list = [t[0] for t in tags]
+                txt = "👤 **برچسب اکانت‌ها (مدیریت)**\n\n"
+                if tag_list:
+                    txt += "برچسب‌های موجود:\n" + "\n".join(f"• {t}" for t in tag_list)
+                else:
+                    txt += "هیچ برچسبی ساخته نشده."
+                await cb.message.edit_text(txt, reply_markup=tags_list_kb(tag_list, "accounts"))
+
             elif d.startswith("tag_new_"):
                 context = d[8:]
                 set_step(ADMIN_ID, f"tag_new_{context}")
@@ -1384,15 +1394,18 @@ def register(app):
 
             elif d.startswith("tag_del_"):
                 _, _, context, tag_name = d.split("_", 3)
-                u("DELETE FROM tags WHERE admin_id=%s AND name=%s", (ADMIN_ID, tag_name))
-                # حذف از گروه‌ها هم
-                u("UPDATE group_tags SET tag_name='' WHERE admin_id=%s AND tag_name=%s",
-                  (ADMIN_ID, tag_name))
-                # حذف از اکانت‌ها هم
-                u("DELETE FROM account_tags WHERE admin_id=%s AND tag_name=%s",
-                  (ADMIN_ID, tag_name))
+                category = "groups" if context == "groups" else "accounts"
+                u("DELETE FROM tags WHERE admin_id=%s AND name=%s AND category=%s",
+                  (ADMIN_ID, tag_name, category))
+                if category == "groups":
+                    u("UPDATE group_tags SET tag_name='' WHERE admin_id=%s AND tag_name=%s",
+                      (ADMIN_ID, tag_name))
+                else:
+                    u("DELETE FROM account_tags WHERE admin_id=%s AND tag_name=%s",
+                      (ADMIN_ID, tag_name))
                 await cb.answer(f"✅ برچسب «{tag_name}» حذف شد", show_alert=True)
-                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category=%s ORDER BY name",
+                         (ADMIN_ID, category))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_reply_markup(tags_list_kb(tag_list, context))
 
@@ -1401,10 +1414,10 @@ def register(app):
                 acc = q("SELECT name,phone FROM accounts WHERE id=%s", (acc_id,))
                 if not acc:
                     await cb.answer("اکانت یافت نشد", show_alert=True); return
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 if not tag_list:
-                    await cb.answer("ابتدا یک برچسب بسازید (مدیریت برچسب‌ها)", show_alert=True)
+                    await cb.answer("ابتدا یک برچسب اکانت بسازید (دکمه ➕ برچسب جدید)", show_alert=True)
                     return
                 cur = q("SELECT tag_name FROM account_tags WHERE admin_id=%s AND account_id=%s",
                         (ADMIN_ID, acc_id))
@@ -1422,7 +1435,7 @@ def register(app):
                 else:
                     u("INSERT IGNORE INTO account_tags (admin_id,account_id,tag_name) VALUES (%s,%s,%s)",
                       (ADMIN_ID, acc_id, tag_name))
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 cur = q("SELECT tag_name FROM account_tags WHERE admin_id=%s AND account_id=%s",
                         (ADMIN_ID, acc_id))
@@ -1566,7 +1579,7 @@ def register(app):
                 else:
                     links = [r[0] for r in rows]
                     set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
-                    tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                    tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                     tag_list = [t[0] for t in tags]
                     await cb.message.edit_text(
                         f"✅ **{len(links)} لینک از پیوی‌ها آماده جوین**\n\nبرچسب گروه‌ها را انتخاب کنید:",

@@ -202,7 +202,7 @@ def register(app):
                 return
             # ذخیره لینک‌ها و رفتن به مرحله انتخاب برچسب
             set_step(ADMIN_ID, f"join_tag_{acc_id}", "\n".join(links))
-            tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+            tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
             tag_list = [t[0] for t in tags]
             await message.reply(
                 f"✅ **{len(links)} لینک دریافت شد**\n\nبرچسب گروه‌ها را انتخاب کنید:",
@@ -281,15 +281,31 @@ def register(app):
 
         elif step.startswith("tag_new_"):
             context = step[8:]
+            category = "accounts" if context == "accounts" else "groups"
             tag_name = text.strip()
             if not tag_name or len(tag_name) > 50:
                 await message.reply("❌ نام برچسب باید بین ۱ تا ۵۰ کاراکتر باشد."); return
             try:
-                u("INSERT INTO tags (admin_id,name) VALUES(%s,%s)", (ADMIN_ID, tag_name))
-                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
-                tag_list = [t[0] for t in tags]
-                await message.reply(f"✅ برچسب «{tag_name}» ساخته شد.",
-                                     reply_markup=tags_list_kb(tag_list, context))
+                u("INSERT INTO tags (admin_id,name,category) VALUES(%s,%s,%s)",
+                  (ADMIN_ID, tag_name, category))
+                if category == "accounts":
+                    from keyboards import account_tag_kb
+                    accs = q(
+                        "SELECT a.id, a.name, a.phone, "
+                        "GROUP_CONCAT(at.tag_name ORDER BY at.tag_name SEPARATOR ', ') "
+                        "FROM accounts a "
+                        "LEFT JOIN account_tags at ON at.account_id=a.id AND at.admin_id=a.admin_id "
+                        "WHERE a.admin_id=%s GROUP BY a.id, a.name, a.phone",
+                        (ADMIN_ID,)
+                    )
+                    await message.reply(f"✅ برچسب «{tag_name}» ساخته شد.\n\nحالا اکانتی رو انتخاب کن تا بهش این برچسب رو بزنی:",
+                                         reply_markup=account_tag_kb(accs))
+                else:
+                    tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name",
+                             (ADMIN_ID,))
+                    tag_list = [t[0] for t in tags]
+                    await message.reply(f"✅ برچسب «{tag_name}» ساخته شد.",
+                                         reply_markup=tags_list_kb(tag_list, context))
             except Exception:
                 await message.reply(f"❌ برچسب «{tag_name}» از قبل وجود دارد.")
             clear_step(ADMIN_ID)
@@ -439,7 +455,7 @@ def register(app):
                 )
             else:
                 set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
-                tags = q("SELECT name FROM tags WHERE admin_id=%s ORDER BY name", (ADMIN_ID,))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
                 tag_list = [t[0] for t in tags]
                 await message.reply(
                     f"✅ {len(links)} لینک دریافت شد.\nبرچسب گروه‌ها را انتخاب کنید:",
