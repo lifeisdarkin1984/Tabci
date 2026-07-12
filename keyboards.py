@@ -116,6 +116,7 @@ def global_sec_kb(active):
          InlineKeyboardButton("💬 پیام دوم", callback_data="gsec_b2")],
         [InlineKeyboardButton("💬 پیام سوم", callback_data="gsec_b3")],
         [InlineKeyboardButton(f"{lbl} منشی همگانی", callback_data="gsec_tog")],
+        [InlineKeyboardButton("⚡ ارسال فوری", callback_data="gsec_now")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
     ])
 
