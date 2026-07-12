@@ -339,6 +339,8 @@ def account_tag_kb(accounts):
             f"👤 {a[1]} | {a[2]}{tag_str}",
             callback_data=f"acctag_sel_{a[0]}"
         )])
+    rows.append([InlineKeyboardButton("➕ برچسب جدید", callback_data="tag_new_accounts")])
+    rows.append([InlineKeyboardButton("🗑 مدیریت/حذف برچسب‌ها", callback_data="tags_accounts_manage")])
     rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="tags_menu")])
     return InlineKeyboardMarkup(rows)
 

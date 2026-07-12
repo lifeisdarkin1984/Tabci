@@ -131,7 +131,8 @@ def init_db():
             id INT AUTO_INCREMENT PRIMARY KEY,
             admin_id BIGINT,
             name VARCHAR(100) NOT NULL,
-            UNIQUE KEY uniq_tag (admin_id, name)
+            category VARCHAR(20) DEFAULT 'groups',
+            UNIQUE KEY uniq_tag (admin_id, name, category)
         )""",
         """CREATE TABLE IF NOT EXISTS group_tags (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -259,12 +260,25 @@ def init_db():
         ("global_scheduler", "current_round", "INT DEFAULT 0"),
         ("accounts", "last_sys_msg_id", "BIGINT DEFAULT 0"),
         ("linkdoni_sources", "source_link", "VARCHAR(300) DEFAULT ''"),
+        ("tags", "category", "VARCHAR(20) DEFAULT 'groups'"),
     ]
     for table, col, definition in new_columns:
         if not column_exists(table, col):
             try:
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
                 print(f"[DB init] added column {col} to {table}")
+                if table == "tags" and col == "category":
+                    # جدا کردن برچسب گروه‌ها و اکانت‌ها: کلید یکتا باید شامل category هم بشه
+                    try:
+                        cur.execute("ALTER TABLE tags DROP INDEX uniq_tag")
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                    try:
+                        cur.execute(
+                            "ALTER TABLE tags ADD UNIQUE KEY uniq_tag (admin_id, name, category)"
+                        )
+                    except Exception as e:
+                        print(f"[DB init] {e}")
             except Exception as e:
                 print(f"[DB init] {e}")
 
