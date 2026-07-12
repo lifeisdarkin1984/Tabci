@@ -342,6 +342,17 @@ def account_tag_kb(accounts):
     rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="tags_menu")])
     return InlineKeyboardMarkup(rows)
 
+def account_tag_multi_kb(acc_id, all_tags, current_tags):
+    """انتخاب چندگانه (toggle) برچسب برای یک اکانت"""
+    rows = []
+    for t in all_tags:
+        mark = "✅" if t in current_tags else "⬜️"
+        rows.append([InlineKeyboardButton(
+            f"{mark} {t}", callback_data=f"acctagm_tog_{acc_id}_{t}"
+        )])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="tags_accounts")])
+    return InlineKeyboardMarkup(rows)
+
 
 # ─── لینکدونی هوشمند ─────────────────────────────────────────
 
@@ -366,6 +377,8 @@ def ld_sources_kb(sources):
                         callback_data=f"ld_src_{s['id']}")])
     buttons.append([InlineKeyboardButton("➕ افزودن لینکدونی",
                     callback_data="ld_add_source")])
+    buttons.append([InlineKeyboardButton("📥 دریافت همه لینک‌ها",
+                    callback_data="ld_src_getall")])
     buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="ld_menu")])
     return InlineKeyboardMarkup(buttons)
 

@@ -142,6 +142,13 @@ def init_db():
             tag_name VARCHAR(100) DEFAULT '',
             UNIQUE KEY uniq_group (admin_id, account_id, chat_id)
         )""",
+        """CREATE TABLE IF NOT EXISTS account_tags (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            account_id VARCHAR(50),
+            tag_name VARCHAR(100) DEFAULT '',
+            UNIQUE KEY uniq_acctag (admin_id, account_id, tag_name)
+        )""",
         """CREATE TABLE IF NOT EXISTS global_scheduler (
             admin_id BIGINT,
             target VARCHAR(10) NOT NULL,
@@ -193,6 +200,7 @@ def init_db():
             admin_id BIGINT,
             chat_id VARCHAR(100) NOT NULL,
             chat_title VARCHAR(200) DEFAULT '',
+            source_link VARCHAR(300) DEFAULT '',
             last_message_id INT DEFAULT 0,
             last_scan TIMESTAMP NULL,
             is_active TINYINT DEFAULT 1,
@@ -250,6 +258,7 @@ def init_db():
         ("global_scheduler", "max_rounds", "INT DEFAULT 0"),
         ("global_scheduler", "current_round", "INT DEFAULT 0"),
         ("accounts", "last_sys_msg_id", "BIGINT DEFAULT 0"),
+        ("linkdoni_sources", "source_link", "VARCHAR(300) DEFAULT ''"),
     ]
     for table, col, definition in new_columns:
         if not column_exists(table, col):
