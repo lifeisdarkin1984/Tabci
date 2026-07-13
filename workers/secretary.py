@@ -1,10 +1,22 @@
 import asyncio
 from pyrogram import enums
-from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
+from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired, FloodWait
 from database import q, u
 from utils import get_user_client, ADMIN_ID
 
 BOT_CLIENT = None  # توسط main.py تنظیم می‌شود
+
+
+async def _send_banner(uc, chat_id, txt, fid, ftype):
+    if fid:
+        if ftype == "photo":
+            await uc.send_photo(chat_id, fid, caption=txt or "")
+        elif ftype == "video":
+            await uc.send_video(chat_id, fid, caption=txt or "")
+        else:
+            await uc.send_document(chat_id, fid, caption=txt or "")
+    else:
+        await uc.send_message(chat_id, txt)
 
 
 async def _reply_to_pvs(uc, acc_id, banners, replied):
@@ -24,26 +36,39 @@ async def _reply_to_pvs(uc, acc_id, banners, replied):
                 break
         if not user_sent:
             continue
+
+        all_sent = True
         for b in banners:
             txt, fid, ftype = b
             if not txt and not fid:
                 print(f"[Secretary] بنر خالی برای {acc_id}، رد شد")
                 continue
             try:
-                if fid:
-                    if ftype == "photo":
-                        await uc.send_photo(dlg.chat.id, fid, caption=txt or "")
-                    elif ftype == "video":
-                        await uc.send_video(dlg.chat.id, fid, caption=txt or "")
-                    else:
-                        await uc.send_document(dlg.chat.id, fid, caption=txt or "")
-                else:
-                    await uc.send_message(dlg.chat.id, txt)
+                await _send_banner(uc, dlg.chat.id, txt, fid, ftype)
                 await asyncio.sleep(2)
+            except FloodWait as e:
+                # هیچ‌وقت break/skip نمی‌زنیم؛ صبر می‌کنیم و همون بنر رو دوباره امتحان می‌کنیم
+                wait_s = min(e.value, 300)
+                print(f"[Secretary] FloodWait {e.value}s برای {acc_id}؛ صبر می‌کند و دوباره تلاش می‌کند...")
+                await asyncio.sleep(wait_s)
+                try:
+                    await _send_banner(uc, dlg.chat.id, txt, fid, ftype)
+                    await asyncio.sleep(2)
+                except Exception as e2:
+                    print(f"[Secretary] ارسال بنر به {uid} بعد از صبر هم ناموفق بود: {e2}")
+                    all_sent = False
             except Exception as e:
                 print(f"[Secretary] خطا در ارسال بنر به {uid}: {e}")
-        replied.add(uid)
-        new_replied.add(uid)
+                all_sent = False
+
+        if all_sent:
+            # فقط وقتی همه‌ی بنرها واقعاً ارسال شدن، کاربر replied علامت می‌خوره
+            replied.add(uid)
+            new_replied.add(uid)
+        # وگرنه دور بعدی منشی دوباره همین کاربر رو امتحان می‌کند
+
+        # فاصله‌ی کوتاه بین PV های مختلف، برای کاهش احتمال FloodWait وقتی PV/اکانت زیاده
+        await asyncio.sleep(1)
     return replied, new_replied
 
 
