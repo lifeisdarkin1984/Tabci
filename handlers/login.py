@@ -4,7 +4,7 @@ from pyrogram.errors import (PhoneNumberInvalid, PhoneCodeInvalid,
     PhoneCodeExpired, SessionPasswordNeeded, PasswordHashInvalid, FloodWait)
 from database import q, u
 from utils import API_ID, API_HASH, ADMIN_ID, save_account, set_step, clear_step
-from keyboards import back_kb, main_menu_kb
+from keyboards import back_kb, main_menu_kb, layers_kb
 
 pending_clients = {}
 
@@ -15,9 +15,24 @@ def register(app):
         if message.from_user.id != ADMIN_ID:
             return
         u("INSERT INTO admins (id) VALUES(%s) ON DUPLICATE KEY UPDATE step='idle'", (ADMIN_ID,))
+        layers = q(
+            "SELECT l.id, l.name, COUNT(a.id) FROM layers l "
+            "LEFT JOIN accounts a ON a.layer_id=l.id "
+            "WHERE l.admin_id=%s GROUP BY l.id, l.name ORDER BY l.id",
+            (ADMIN_ID,)
+        )
+        if not layers:
+            # نباید پیش بیاد (init_db یه لایه‌ی پیش‌فرض می‌سازه)، ولی برای اطمینان:
+            u("INSERT INTO layers (admin_id, name) VALUES (%s,%s)", (ADMIN_ID, "لایه ۱"))
+            layers = q(
+                "SELECT l.id, l.name, COUNT(a.id) FROM layers l "
+                "LEFT JOIN accounts a ON a.layer_id=l.id "
+                "WHERE l.admin_id=%s GROUP BY l.id, l.name ORDER BY l.id",
+                (ADMIN_ID,)
+            )
         await message.reply(
-            "👋 **به تبچی پرسونال خوش آمدید**\n\nیک گزینه را انتخاب کنید:",
-            reply_markup=main_menu_kb()
+            "👋 **به تبچی پرسونال خوش آمدید**\n\nیک لایه را انتخاب کنید:",
+            reply_markup=layers_kb(layers)
         )
 
     @app.on_message(filters.private & filters.command("add_account"))
@@ -36,9 +51,12 @@ def register(app):
     async def cmd_list(client, message):
         if message.from_user.id != ADMIN_ID:
             return
-        accs = q("SELECT id,phone,name FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+        cur = q("SELECT current_layer_id FROM admins WHERE id=%s", (ADMIN_ID,))
+        layer_id = cur[0][0] if cur else None
+        accs = q("SELECT id,phone,name FROM accounts WHERE admin_id=%s AND layer_id=%s",
+                 (ADMIN_ID, layer_id))
         if not accs:
-            await message.reply("هیچ اکانتی ثبت نشده.\n\nبرای افزودن: /add_account")
+            await message.reply("هیچ اکانتی تو این لایه ثبت نشده.\n\nبرای افزودن: /add_account")
             return
         txt = f"📌 **لیست تبچی‌های شما ({len(accs)} اکانت)**\n\n"
         for a in accs:

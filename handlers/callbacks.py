@@ -4,7 +4,7 @@ from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBu
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
                    clear_step, get_user_client, is_stopped, set_stop,
-                   clear_chat_history)
+                   clear_chat_history, get_current_layer)
 from keyboards import *
 import workers.reply_worker as rw
 import workers.react_worker as rcw
@@ -22,8 +22,93 @@ def register(app):
             if d == "back_main":
                 await cb.message.edit_text("یک گزینه را انتخاب کنید:", reply_markup=main_menu_kb())
 
+            elif d == "layers_menu":
+                layers = q(
+                    "SELECT l.id, l.name, COUNT(a.id) FROM layers l "
+                    "LEFT JOIN accounts a ON a.layer_id=l.id "
+                    "WHERE l.admin_id=%s GROUP BY l.id, l.name ORDER BY l.id",
+                    (ADMIN_ID,)
+                )
+                await cb.message.edit_text("یک لایه را انتخاب کنید:", reply_markup=layers_kb(layers))
+
+            elif d.startswith("layer_sel_"):
+                layer_id = d[10:]
+                lyr = q("SELECT name FROM layers WHERE id=%s AND admin_id=%s", (layer_id, ADMIN_ID))
+                if not lyr:
+                    await cb.answer("لایه یافت نشد", show_alert=True); return
+                u("UPDATE admins SET current_layer_id=%s WHERE id=%s", (layer_id, ADMIN_ID))
+                await cb.message.edit_text(
+                    f"✅ لایه‌ی **{lyr[0][0]}** فعال شد.\n\nیک گزینه را انتخاب کنید:",
+                    reply_markup=main_menu_kb()
+                )
+
+            elif d == "layer_new":
+                set_step(ADMIN_ID, "layer_new")
+                await cb.message.edit_text(
+                    "📝 نام لایه‌ی جدید را وارد کنید:\nمثال: `تبلیغاتی`",
+                    reply_markup=back_kb("layers_menu")
+                )
+
+            elif d.startswith("layer_mng_"):
+                layer_id = d[10:]
+                lyr = q("SELECT name FROM layers WHERE id=%s AND admin_id=%s", (layer_id, ADMIN_ID))
+                if not lyr:
+                    await cb.answer("لایه یافت نشد", show_alert=True); return
+                await cb.message.edit_text(
+                    f"⚙️ مدیریت لایه‌ی **{lyr[0][0]}**",
+                    reply_markup=layer_manage_kb(layer_id)
+                )
+
+            elif d.startswith("layer_ren_"):
+                layer_id = d[10:]
+                set_step(ADMIN_ID, f"layer_ren_{layer_id}")
+                await cb.message.edit_text(
+                    "✏️ نام جدید لایه را وارد کنید:",
+                    reply_markup=back_kb(f"layer_mng_{layer_id}")
+                )
+
+            elif d.startswith("layer_del_yes_"):
+                layer_id = d[14:]
+                cnt = q("SELECT COUNT(*) FROM accounts WHERE layer_id=%s AND admin_id=%s",
+                        (layer_id, ADMIN_ID))
+                if cnt and cnt[0][0] > 0:
+                    await cb.answer("❌ این لایه اکانت دارد و قابل حذف نیست.", show_alert=True)
+                    return
+                u("DELETE FROM layers WHERE id=%s AND admin_id=%s", (layer_id, ADMIN_ID))
+                cur_lyr = q("SELECT current_layer_id FROM admins WHERE id=%s", (ADMIN_ID,))
+                if cur_lyr and str(cur_lyr[0][0]) == str(layer_id):
+                    remaining = q("SELECT id FROM layers WHERE admin_id=%s ORDER BY id LIMIT 1", (ADMIN_ID,))
+                    new_cur = remaining[0][0] if remaining else None
+                    u("UPDATE admins SET current_layer_id=%s WHERE id=%s", (new_cur, ADMIN_ID))
+                await cb.answer("✅ لایه حذف شد", show_alert=True)
+                layers = q(
+                    "SELECT l.id, l.name, COUNT(a.id) FROM layers l "
+                    "LEFT JOIN accounts a ON a.layer_id=l.id "
+                    "WHERE l.admin_id=%s GROUP BY l.id, l.name ORDER BY l.id",
+                    (ADMIN_ID,)
+                )
+                await cb.message.edit_text("یک لایه را انتخاب کنید:", reply_markup=layers_kb(layers))
+
+            elif d.startswith("layer_del_"):
+                layer_id = d[10:]
+                cnt = q("SELECT COUNT(*) FROM accounts WHERE layer_id=%s AND admin_id=%s",
+                        (layer_id, ADMIN_ID))
+                if cnt and cnt[0][0] > 0:
+                    await cb.answer(
+                        f"❌ این لایه {cnt[0][0]} اکانت دارد. اول اکانت‌ها را حذف یا منتقل کن.",
+                        show_alert=True
+                    )
+                    return
+                await cb.message.edit_text(
+                    "⚠️ حذف این لایه (خالی از اکانت) قطعی است؟",
+                    reply_markup=confirm_kb(f"layer_del_yes_{layer_id}", f"layer_mng_{layer_id}")
+                )
+
             elif d == "menu_tabchi":
-                accs = q("SELECT id,phone,name FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                cur_lyr = q("SELECT current_layer_id FROM admins WHERE id=%s", (ADMIN_ID,))
+                layer_id = cur_lyr[0][0] if cur_lyr else None
+                accs = q("SELECT id,phone,name FROM accounts WHERE admin_id=%s AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 if not accs:
                     await cb.answer("/add_account برای افزودن", show_alert=True); return
                 await cb.message.edit_text("📌 **لیست تبچی‌های شما:**", reply_markup=tabchi_list_kb(accs))
@@ -40,7 +125,9 @@ def register(app):
                                             reply_markup=confirm_kb("g_delpv_yes", "g_del_menu"))
 
             elif d == "g_delpv_yes":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 set_stop(False)
                 await cb.message.edit_text(f"⏳ حذف پیوی‌ها برای {len(accs)} اکانت شروع شد...")
                 for (aid,) in accs:
@@ -51,7 +138,9 @@ def register(app):
                                             reply_markup=confirm_kb("g_delbot_yes", "g_del_menu"))
 
             elif d == "g_delbot_yes":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 set_stop(False)
                 await cb.message.edit_text(f"⏳ حذف ربات‌ها برای {len(accs)} اکانت شروع شد...")
                 for (aid,) in accs:
@@ -62,14 +151,17 @@ def register(app):
                                             reply_markup=confirm_kb("g_delchannel_yes", "g_del_menu"))
 
             elif d == "g_delchannel_yes":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 set_stop(False)
                 await cb.message.edit_text(f"⏳ خروج از کانال‌ها برای {len(accs)} اکانت شروع شد...")
                 for (aid,) in accs:
                     t = asyncio.create_task(_delete_channels_task(client, aid)); t.set_name("del_channel_task")
 
             elif d == "g_delgrp":
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 if not tag_list:
                     await cb.message.edit_text(
@@ -81,7 +173,8 @@ def register(app):
 
             elif d.startswith("gdelgrpatag_tag_"):
                 acc_tag = d[16:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text("👥 حذف کدوم گروه‌ها؟",
                                             reply_markup=tag_select_kb(tag_list, f"gdelgrpgtag_{acc_tag}"))
@@ -124,7 +217,10 @@ def register(app):
                 for tbl in ["accounts","secretary","scheduler","banners","join_settings","reply_rand","react_rand"]:
                     col = "id" if tbl == "accounts" else "account_id"
                     u(f"DELETE FROM {tbl} WHERE {col}=%s", (acc_id,))
-                accs = q("SELECT id,phone,name FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                cur_lyr = q("SELECT current_layer_id FROM admins WHERE id=%s", (ADMIN_ID,))
+                layer_id = cur_lyr[0][0] if cur_lyr else None
+                accs = q("SELECT id,phone,name FROM accounts WHERE admin_id=%s AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 if accs:
                     await cb.message.edit_text("✅ حذف شد.\n\n📌 لیست:", reply_markup=tabchi_list_kb(accs))
                 else:
@@ -161,6 +257,41 @@ def register(app):
                     reply_markup=manage_kb(acc_id)
                 )
 
+            elif d.startswith("acc_movelyr_do_"):
+                rest = d[15:]
+                acc_id, _, layer_id = rest.rpartition("_")
+                acc = q("SELECT name, layer_id FROM accounts WHERE id=%s AND admin_id=%s",
+                        (acc_id, ADMIN_ID))
+                if not acc:
+                    await cb.answer("اکانت یافت نشد", show_alert=True); return
+                lyr = q("SELECT name FROM layers WHERE id=%s AND admin_id=%s", (layer_id, ADMIN_ID))
+                if not lyr:
+                    await cb.answer("لایه یافت نشد", show_alert=True); return
+                u("UPDATE accounts SET layer_id=%s WHERE id=%s AND admin_id=%s",
+                  (layer_id, acc_id, ADMIN_ID))
+                await cb.answer(f"✅ به لایه‌ی «{lyr[0][0]}» منتقل شد", show_alert=True)
+                await cb.message.edit_text(
+                    f"⚙️ پنل مدیریت **{acc[0][0]}**",
+                    reply_markup=manage_kb(acc_id)
+                )
+
+            elif d.startswith("acc_movelyr_"):
+                acc_id = d[12:]
+                acc = q("SELECT layer_id FROM accounts WHERE id=%s AND admin_id=%s", (acc_id, ADMIN_ID))
+                if not acc:
+                    await cb.answer("اکانت یافت نشد", show_alert=True); return
+                cur_layer_id = acc[0][0]
+                others = q("SELECT id,name FROM layers WHERE admin_id=%s AND id!=%s ORDER BY id",
+                           (ADMIN_ID, cur_layer_id))
+                if not others:
+                    await cb.answer("لایه‌ی دیگری برای انتقال وجود ندارد. اول یه لایه‌ی جدید بساز.",
+                                     show_alert=True)
+                    return
+                await cb.message.edit_text(
+                    "📦 به کدوم لایه منتقل بشه؟",
+                    reply_markup=layer_move_kb(acc_id, others)
+                )
+
             elif d.startswith("acc_code_"):
                 acc_id = d[9:]
                 acc = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
@@ -180,7 +311,10 @@ def register(app):
                     await cb.answer(f"❌ {str(e)[:80]}", show_alert=True)
 
             elif d == "acc_refresh":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                cur_lyr = q("SELECT current_layer_id FROM admins WHERE id=%s", (ADMIN_ID,))
+                layer_id = cur_lyr[0][0] if cur_lyr else None
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 ok = 0
                 for (aid,) in accs:
                     try:
@@ -243,8 +377,10 @@ def register(app):
 
             # ══ global خروج خودکار ══
             elif d == "g_autoleave_tog":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
-                row = q("SELECT auto_leave_limited FROM accounts WHERE admin_id=%s LIMIT 1", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s", (ADMIN_ID, layer_id))
+                row = q("SELECT auto_leave_limited FROM accounts WHERE admin_id=%s AND layer_id=%s LIMIT 1",
+                        (ADMIN_ID, layer_id))
                 cur = row[0][0] if row else 0
                 new = 0 if cur else 1
                 for (aid,) in accs:
@@ -253,8 +389,11 @@ def register(app):
 
             # ══ global عضویت اجبار ══
             elif d == "g_fj_tog":
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
-                row = q("SELECT force_join_active FROM join_settings WHERE admin_id=%s LIMIT 1", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s", (ADMIN_ID, layer_id))
+                row = q("SELECT force_join_active FROM join_settings WHERE admin_id=%s "
+                        "AND account_id IN (SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s) LIMIT 1",
+                        (ADMIN_ID, ADMIN_ID, layer_id))
                 cur = row[0][0] if row else 0
                 new = 0 if cur else 1
                 for (aid,) in accs:
@@ -317,7 +456,9 @@ def register(app):
                     active = row[0][0] if row else 0
                     await cb.message.edit_text("👽 پنل منشی:", reply_markup=secretary_kb(acc_id, active))
                 elif ctx == "g_secretary":
-                    row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                    layer_id = get_current_layer()
+                    row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s AND layer_id=%s",
+                            (ADMIN_ID, layer_id))
                     active = bool(row[0][0]) if row else False
                     await cb.message.edit_text("🤖 **منشی خودکار همگانی**", reply_markup=global_sec_kb(active))
                 else:
@@ -464,7 +605,8 @@ def register(app):
             # ══ حذف گروه‌ها (تک‌اکانت) ══
             elif d.startswith("m_delgrp_"):
                 acc_id = d[9:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 if not tag_list:
                     await cb.message.edit_text(
@@ -595,7 +737,8 @@ def register(app):
                     await cb.answer("❌ هیچ لینکی برای جوین وجود ندارد.", show_alert=True)
                     clear_step(ADMIN_ID)
                     return
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 set_step(ADMIN_ID, "g_join_tag", "\n".join(chosen_links))
                 await cb.message.edit_text(
@@ -667,7 +810,8 @@ def register(app):
                 msg_text = get_step_data(ADMIN_ID)
                 # ذخیره متن + acc_id برای مرحله بعد
                 set_step(ADMIN_ID, f"sgrp_gtag_{acc_id}", msg_text)
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "📢 ارسال به کدوم گروه‌ها؟",
@@ -740,7 +884,7 @@ def register(app):
                 acc_id = d[11:]
                 bnrs = q("SELECT slot,text,file_id FROM reply_rand_banners "
                          "WHERE account_id=%s ORDER BY slot", (acc_id,))
-                back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+                back = "g_rr" if acc_id.startswith("global") else f"m_reply_{acc_id}"
                 txt = "📋 **مدیریت متن‌های ریپلای**\n\n"
                 if bnrs:
                     for b in bnrs:
@@ -754,7 +898,7 @@ def register(app):
             elif d.startswith("rr_badd_"):
                 acc_id = d[8:]
                 set_step(ADMIN_ID, f"rr_badd_{acc_id}")
-                back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+                back = "g_rr" if acc_id.startswith("global") else f"m_reply_{acc_id}"
                 await cb.message.edit_text("📝 متن ریپلای جدید را وارد کنید:",
                                             reply_markup=back_kb(f"rr_banners_{acc_id}"))
 
@@ -768,19 +912,20 @@ def register(app):
                     u("UPDATE reply_rand_banners SET slot=%s WHERE id=%s", (i, rid))
                 await cb.answer(f"✅ متن {slot} حذف شد")
                 bnrs = q("SELECT slot,text,file_id FROM reply_rand_banners WHERE account_id=%s ORDER BY slot", (acc_id,))
-                back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+                back = "g_rr" if acc_id.startswith("global") else f"m_reply_{acc_id}"
                 await cb.message.edit_reply_markup(reply_banner_list_kb(acc_id, bnrs, back_to=back))
 
             elif d.startswith("rr_bdelall_"):
                 acc_id = d[11:]
                 u("DELETE FROM reply_rand_banners WHERE account_id=%s", (acc_id,))
                 await cb.answer("✅ همه متن‌ها حذف شدند")
-                back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+                back = "g_rr" if acc_id.startswith("global") else f"m_reply_{acc_id}"
                 await cb.message.edit_reply_markup(reply_banner_list_kb(acc_id, [], back_to=back))
 
             elif d.startswith("rr_gtag_"):
                 acc_id = d[8:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "🏷 فیلتر گروه‌ها برای ریپلای:",
@@ -797,12 +942,13 @@ def register(app):
                 active = row[0][0] if row else 0
                 gtag = row[0][1] if row else "ALL"
                 atag = row[0][2] if row else "ALL"
-                back = "menu_global" if acc_id == "global" else None
+                back = "menu_global" if acc_id.startswith("global") else None
                 await cb.message.edit_reply_markup(reply_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
             elif d.startswith("rr_atag_"):
                 acc_id = d[8:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "👤 فیلتر اکانت‌ها برای ریپلای:",
@@ -819,12 +965,13 @@ def register(app):
                 active = row[0][0] if row else 0
                 gtag = row[0][1] if row else "ALL"
                 atag = row[0][2] if row else "ALL"
-                back = "menu_global" if acc_id == "global" else None
+                back = "menu_global" if acc_id.startswith("global") else None
                 await cb.message.edit_reply_markup(reply_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
             elif d.startswith("rc_gtag_"):
                 acc_id = d[8:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "🏷 فیلتر گروه‌ها برای ری‌اکت:",
@@ -841,12 +988,13 @@ def register(app):
                 active = row[0][0] if row else 0
                 gtag = row[0][1] if row else "ALL"
                 atag = row[0][2] if row else "ALL"
-                back = "menu_global" if acc_id == "global" else None
+                back = "menu_global" if acc_id.startswith("global") else None
                 await cb.message.edit_reply_markup(react_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
             elif d.startswith("rc_atag_"):
                 acc_id = d[8:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "👤 فیلتر اکانت‌ها برای ری‌اکت:",
@@ -863,7 +1011,7 @@ def register(app):
                 active = row[0][0] if row else 0
                 gtag = row[0][1] if row else "ALL"
                 atag = row[0][2] if row else "ALL"
-                back = "menu_global" if acc_id == "global" else None
+                back = "menu_global" if acc_id.startswith("global") else None
                 await cb.message.edit_reply_markup(react_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
             elif d.startswith("rr_time_"):
@@ -884,7 +1032,7 @@ def register(app):
                 active = row2[0][0] if row2 else 0
                 gtag = row2[0][1] if row2 else "ALL"
                 atag = row2[0][2] if row2 else "ALL"
-                back = "menu_global" if acc_id == "global" else None
+                back = "menu_global" if acc_id.startswith("global") else None
                 await cb.message.edit_reply_markup(reply_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
             elif d.startswith("rr_run_"):
@@ -897,23 +1045,25 @@ def register(app):
                             "FROM reply_rand WHERE account_id=%s", (acc_id,))
                 gtag = (row_cfg[0][1] if row_cfg else None) or "ALL"
                 atag = (row_cfg[0][2] if row_cfg else None) or "ALL"
-                if acc_id == "global":
-                    # فیلتر اکانت‌ها
+                if acc_id.startswith("global"):
+                    lyr_id = int(acc_id[6:]) if acc_id[6:].isdigit() else get_current_layer()
+                    # فیلتر اکانت‌ها (فقط همین لایه)
                     if atag not in ("ALL", ""):
                         if atag == "NOTAG":
                             accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
-                                     "AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+                                     "AND layer_id=%s AND (tag='' OR tag IS NULL)", (ADMIN_ID, lyr_id))
                         else:
-                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND tag=%s",
-                                     (ADMIN_ID, atag))
+                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
+                                     "AND layer_id=%s AND tag=%s", (ADMIN_ID, lyr_id, atag))
                     else:
-                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                                 (ADMIN_ID, lyr_id))
                     idx = (row_cfg[0][0] if row_cfg else 0) % len(bnrs)
                     msg_text = bnrs[idx][0]
                     for (aid,) in accs:
                         asyncio.create_task(rw.run_once(aid, msg_text, group_tag_filter=gtag))
-                    u("INSERT INTO reply_rand (account_id,admin_id,last_index) VALUES('global',%s,%s) "
-                      "ON DUPLICATE KEY UPDATE last_index=%s", (ADMIN_ID, idx+1, idx+1))
+                    u("INSERT INTO reply_rand (account_id,admin_id,last_index) VALUES(%s,%s,%s) "
+                      "ON DUPLICATE KEY UPDATE last_index=%s", (acc_id, ADMIN_ID, idx+1, idx+1))
                     await cb.answer(f"🚀 برای {len(accs)} اکانت شروع شد", show_alert=True)
                 else:
                     idx = (row_cfg[0][0] if row_cfg else 0) % len(bnrs)
@@ -951,7 +1101,7 @@ def register(app):
                 active = row2[0][0] if row2 else 0
                 gtag = row2[0][1] if row2 else "ALL"
                 atag = row2[0][2] if row2 else "ALL"
-                back = "menu_global" if acc_id == "global" else None
+                back = "menu_global" if acc_id.startswith("global") else None
                 await cb.message.edit_reply_markup(react_rand_kb(acc_id, active, back_to=back, group_tag=gtag, acc_tag=atag))
 
             elif d.startswith("rc_run_"):
@@ -960,16 +1110,18 @@ def register(app):
                 row_cfg = q("SELECT group_tag_filter, acc_tag_filter FROM react_rand WHERE account_id=%s", (acc_id,))
                 gtag = (row_cfg[0][0] if row_cfg else None) or "ALL"
                 atag = (row_cfg[0][1] if row_cfg else None) or "ALL"
-                if acc_id == "global":
+                if acc_id.startswith("global"):
+                    lyr_id = int(acc_id[6:]) if acc_id[6:].isdigit() else get_current_layer()
                     if atag not in ("ALL", ""):
                         if atag == "NOTAG":
                             accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
-                                     "AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+                                     "AND layer_id=%s AND (tag='' OR tag IS NULL)", (ADMIN_ID, lyr_id))
                         else:
-                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND tag=%s",
-                                     (ADMIN_ID, atag))
+                            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
+                                     "AND layer_id=%s AND tag=%s", (ADMIN_ID, lyr_id, atag))
                     else:
-                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                                 (ADMIN_ID, lyr_id))
                     for (aid,) in accs:
                         asyncio.create_task(rcw.run_once(aid, group_tag_filter=gtag))
                     await cb.answer(f"🚀 برای {len(accs)} اکانت شروع شد", show_alert=True)
@@ -979,7 +1131,9 @@ def register(app):
 
             # ══ global ══
             elif d == "g_stats":
-                accs = q("SELECT id,name,phone FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id,name,phone FROM accounts WHERE admin_id=%s AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 total_g = total_p = 0
                 txt = f"📊 **آمار ({len(accs)} اکانت)**\n\n"
                 for a in accs:
@@ -998,7 +1152,9 @@ def register(app):
                 await cb.message.edit_text(txt, reply_markup=back_kb("menu_global"))
 
             elif d == "g_status":
-                accs = q("SELECT id,name,phone FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id,name,phone FROM accounts WHERE admin_id=%s AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 txt = "♻️ **وضعیت:**\n\n"
                 for a in accs:
                     uc = await get_user_client(a[0])
@@ -1021,7 +1177,8 @@ def register(app):
 
             elif d == "g_spv_go":
                 text = get_step_data(ADMIN_ID)
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s", (ADMIN_ID, layer_id))
                 set_stop(False)
                 for (aid,) in accs:
                     t = asyncio.create_task(_send_to_pvs(client, aid, text)); t.set_name("send_pv_task")
@@ -1032,11 +1189,14 @@ def register(app):
 
             elif d == "g_sgrp_go":
                 msg_text = get_step_data(ADMIN_ID)
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' AND layer_id=%s ORDER BY name",
+                         (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 if not tag_list:
                     # هیچ برچسبی تعریف نشده - مستقیم با همه شروع کن
-                    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                             (ADMIN_ID, layer_id))
                     set_stop(False)
                     await cb.message.edit_text(f"⏳ ارسال به {len(accs)} اکانت شروع شد...")
                     for (aid,) in accs:
@@ -1057,7 +1217,8 @@ def register(app):
                 msg_text = get_step_data(ADMIN_ID)
                 # ذخیره acc_tag در step_data برای مرحله بعد
                 set_step(ADMIN_ID, f"g_sgrp_gtag_{acc_tag}", msg_text)
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text(
                     "👥 ارسال به کدوم گروه‌ها؟",
@@ -1091,7 +1252,8 @@ def register(app):
                     links = [l for l in lines[1:] if l.strip()]
                 else:
                     links = [l for l in lines if l.strip()]
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s", (ADMIN_ID, layer_id))
                 if not accs:
                     await cb.answer("اکانتی وجود ندارد", show_alert=True); return
                 per = max(1, len(links) // len(accs))
@@ -1120,7 +1282,8 @@ def register(app):
                     links = [l for l in lines[1:] if l.strip()]
                 else:
                     links = [l for l in lines if l.strip()]
-                accs = q("SELECT id FROM accounts WHERE admin_id=%s", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                accs = q("SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s", (ADMIN_ID, layer_id))
                 set_stop(False)
                 tag_lbl = f"«{chosen_tag}»" if chosen_tag else "بدون برچسب"
                 await cb.message.edit_text(
@@ -1157,9 +1320,10 @@ def register(app):
 
             elif d.startswith("gsch_panel_"):
                 target = d[11:]
+                layer_id = get_current_layer()
                 row = q("SELECT is_active, interval_minutes, group_tag_filter, acc_tag_filter, "
                         "max_rounds, current_round FROM global_scheduler "
-                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                        "WHERE admin_id=%s AND target=%s AND layer_id=%s", (ADMIN_ID, target, layer_id))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 60
                 gtag = (row[0][2] if row else None) or "ALL"
@@ -1168,7 +1332,7 @@ def register(app):
                 current_round = row[0][5] if row else 0
                 title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
                 bnrs = q("SELECT slot, text, file_id FROM global_banners "
-                         "WHERE admin_id=%s AND target=%s ORDER BY slot", (ADMIN_ID, target))
+                         "WHERE admin_id=%s AND target=%s AND layer_id=%s ORDER BY slot", (ADMIN_ID, target, layer_id))
                 txt = f"⏰ **ارسال زمان‌دار به {title}**\n\n"
                 txt += f"فاصله: هر {interval} دقیقه\nوضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n"
                 txt += f"🏷 گروه: {gtag} | 👤 اکانت: {atag}\n"
@@ -1200,11 +1364,12 @@ def register(app):
             elif d.startswith("gsch_gtag_set_"):
                 rest = d[14:]
                 target, _, tag_name = rest.partition("_tag_")
-                u("INSERT INTO global_scheduler (admin_id,target,group_tag_filter) VALUES(%s,%s,%s) "
-                  "ON DUPLICATE KEY UPDATE group_tag_filter=%s", (ADMIN_ID, target, tag_name, tag_name))
+                layer_id = get_current_layer()
+                u("INSERT INTO global_scheduler (admin_id,target,layer_id,group_tag_filter) VALUES(%s,%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE group_tag_filter=%s", (ADMIN_ID, target, layer_id, tag_name, tag_name))
                 await cb.answer(f"✅ فیلتر گروه: {tag_name}")
                 row = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM global_scheduler "
-                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                        "WHERE admin_id=%s AND target=%s AND layer_id=%s", (ADMIN_ID, target, layer_id))
                 active = row[0][0] if row else 0
                 gtag = row[0][1] if row else "ALL"
                 atag = row[0][2] if row else "ALL"
@@ -1212,7 +1377,8 @@ def register(app):
 
             elif d.startswith("gsch_gtag_"):
                 target = d[10:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text("🏷 فیلتر گروه‌ها برای زمان‌بند:",
                     reply_markup=tag_select_kb(tag_list, f"gsch_gtag_set_{target}"))
@@ -1220,11 +1386,12 @@ def register(app):
             elif d.startswith("gsch_atag_set_"):
                 rest = d[14:]
                 target, _, tag_name = rest.partition("_tag_")
-                u("INSERT INTO global_scheduler (admin_id,target,acc_tag_filter) VALUES(%s,%s,%s) "
-                  "ON DUPLICATE KEY UPDATE acc_tag_filter=%s", (ADMIN_ID, target, tag_name, tag_name))
+                layer_id = get_current_layer()
+                u("INSERT INTO global_scheduler (admin_id,target,layer_id,acc_tag_filter) VALUES(%s,%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE acc_tag_filter=%s", (ADMIN_ID, target, layer_id, tag_name, tag_name))
                 await cb.answer(f"✅ فیلتر اکانت: {tag_name}")
                 row = q("SELECT is_active,group_tag_filter,acc_tag_filter FROM global_scheduler "
-                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                        "WHERE admin_id=%s AND target=%s AND layer_id=%s", (ADMIN_ID, target, layer_id))
                 active = row[0][0] if row else 0
                 gtag = row[0][1] if row else "ALL"
                 atag = row[0][2] if row else "ALL"
@@ -1232,7 +1399,8 @@ def register(app):
 
             elif d.startswith("gsch_atag_"):
                 target = d[10:]
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_text("👤 فیلتر اکانت‌ها برای زمان‌بند:",
                     reply_markup=tag_select_kb(tag_list, f"gsch_atag_set_{target}"))
@@ -1247,21 +1415,22 @@ def register(app):
 
             elif d.startswith("gsch_tog_"):
                 target = d[9:]
-                row = q("SELECT is_active FROM global_scheduler WHERE admin_id=%s AND target=%s",
-                        (ADMIN_ID, target))
+                layer_id = get_current_layer()
+                row = q("SELECT is_active FROM global_scheduler WHERE admin_id=%s AND target=%s AND layer_id=%s",
+                        (ADMIN_ID, target, layer_id))
                 new = 0 if (row[0][0] if row else 0) else 1
                 if new:
                     # روشن کردن — reset دور
-                    u("INSERT INTO global_scheduler (admin_id,target,is_active,current_round) "
-                      "VALUES(%s,%s,%s,0) ON DUPLICATE KEY UPDATE is_active=%s, current_round=0",
-                      (ADMIN_ID, target, new, new))
+                    u("INSERT INTO global_scheduler (admin_id,target,layer_id,is_active,current_round) "
+                      "VALUES(%s,%s,%s,%s,0) ON DUPLICATE KEY UPDATE is_active=%s, current_round=0",
+                      (ADMIN_ID, target, layer_id, new, new))
                     set_stop(False)
                 else:
-                    u("INSERT INTO global_scheduler (admin_id,target,is_active) VALUES(%s,%s,%s) "
-                      "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, target, new, new))
+                    u("INSERT INTO global_scheduler (admin_id,target,layer_id,is_active) VALUES(%s,%s,%s,%s) "
+                      "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, target, layer_id, new, new))
                 await cb.answer(f"ارسال زمان‌دار {'فعال' if new else 'غیرفعال'} شد")
                 row2 = q("SELECT is_active,group_tag_filter,acc_tag_filter,max_rounds,current_round "
-                         "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                         "FROM global_scheduler WHERE admin_id=%s AND target=%s AND layer_id=%s", (ADMIN_ID, target, layer_id))
                 active = row2[0][0] if row2 else 0
                 gtag = (row2[0][1] if row2 else None) or "ALL"
                 atag = (row2[0][2] if row2 else None) or "ALL"
@@ -1288,21 +1457,25 @@ def register(app):
             elif d.startswith("gbn_del_"):
                 _, _, target, slot = d.split("_", 3)
                 slot = int(slot)
-                u("DELETE FROM global_banners WHERE admin_id=%s AND target=%s AND slot=%s",
-                  (ADMIN_ID, target, slot))
+                layer_id = get_current_layer()
+                u("DELETE FROM global_banners WHERE admin_id=%s AND target=%s AND slot=%s AND layer_id=%s",
+                  (ADMIN_ID, target, slot, layer_id))
                 await cb.answer(f"✅ پیام {slot} حذف شد")
                 await cb.message.edit_reply_markup(global_banner_slot_kb(target, slot))
 
             elif d.startswith("gbn_delall_"):
                 target = d[11:]
-                u("DELETE FROM global_banners WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                layer_id = get_current_layer()
+                u("DELETE FROM global_banners WHERE admin_id=%s AND target=%s AND layer_id=%s",
+                  (ADMIN_ID, target, layer_id))
                 await cb.answer("✅ همه پیام‌ها حذف شدند")
 
             elif d.startswith("gbn_back_"):
                 target = d[9:]
+                layer_id = get_current_layer()
                 row = q("SELECT is_active, interval_minutes, group_tag_filter, acc_tag_filter, "
                         "max_rounds, current_round FROM global_scheduler "
-                        "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                        "WHERE admin_id=%s AND target=%s AND layer_id=%s", (ADMIN_ID, target, layer_id))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 60
                 gtag = (row[0][2] if row else None) or "ALL"
@@ -1311,7 +1484,7 @@ def register(app):
                 cur_r = row[0][5] if row else 0
                 title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
                 bnrs = q("SELECT slot, text, file_id FROM global_banners "
-                         "WHERE admin_id=%s AND target=%s ORDER BY slot", (ADMIN_ID, target))
+                         "WHERE admin_id=%s AND target=%s AND layer_id=%s ORDER BY slot", (ADMIN_ID, target, layer_id))
                 txt = f"⏰ **ارسال زمان‌دار به {title}**\n\n"
                 txt += f"فاصله: هر {interval} دقیقه\nوضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n\n"
                 for slot in (1, 2, 3, 4):
@@ -1329,7 +1502,9 @@ def register(app):
                 set_step(ADMIN_ID, "g_fwdgrp"); await cb.message.edit_text("📤 لینک پیام:", reply_markup=back_kb("menu_global"))
 
             elif d == "g_autoleave":
-                row = q("SELECT auto_leave_limited FROM accounts WHERE admin_id=%s LIMIT 1", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                row = q("SELECT auto_leave_limited FROM accounts WHERE admin_id=%s AND layer_id=%s LIMIT 1",
+                        (ADMIN_ID, layer_id))
                 active = row[0][0] if row else 0
                 await cb.message.edit_text(
                     f"🚫 **خروج خودکار از گروه‌های محدود (همگانی)**\n\n"
@@ -1350,7 +1525,8 @@ def register(app):
                 )
 
             elif d == "tags_groups":
-                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 txt = "👥 **برچسب گروه‌ها**\n\n"
                 if tag_list:
@@ -1360,13 +1536,14 @@ def register(app):
                 await cb.message.edit_text(txt, reply_markup=tags_list_kb(tag_list, "groups"))
 
             elif d == "tags_accounts":
+                layer_id = get_current_layer()
                 accs = q(
                     "SELECT a.id, a.name, a.phone, "
                     "GROUP_CONCAT(at.tag_name ORDER BY at.tag_name SEPARATOR ', ') "
                     "FROM accounts a "
                     "LEFT JOIN account_tags at ON at.account_id=a.id AND at.admin_id=a.admin_id "
-                    "WHERE a.admin_id=%s GROUP BY a.id, a.name, a.phone",
-                    (ADMIN_ID,)
+                    "WHERE a.admin_id=%s AND a.layer_id=%s GROUP BY a.id, a.name, a.phone",
+                    (ADMIN_ID, layer_id)
                 )
                 txt = "👤 **برچسب اکانت‌ها**\n\n"
                 for a in accs:
@@ -1375,7 +1552,8 @@ def register(app):
                 await cb.message.edit_text(txt, reply_markup=account_tag_kb(accs))
 
             elif d == "tags_accounts_manage":
-                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='accounts' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 txt = "👤 **برچسب اکانت‌ها (مدیریت)**\n\n"
                 if tag_list:
@@ -1395,17 +1573,18 @@ def register(app):
             elif d.startswith("tag_del_"):
                 _, _, context, tag_name = d.split("_", 3)
                 category = "groups" if context == "groups" else "accounts"
-                u("DELETE FROM tags WHERE admin_id=%s AND name=%s AND category=%s",
-                  (ADMIN_ID, tag_name, category))
+                layer_id = get_current_layer()
+                u("DELETE FROM tags WHERE admin_id=%s AND name=%s AND category=%s AND layer_id=%s",
+                  (ADMIN_ID, tag_name, category, layer_id))
                 if category == "groups":
-                    u("UPDATE group_tags SET tag_name='' WHERE admin_id=%s AND tag_name=%s",
-                      (ADMIN_ID, tag_name))
+                    u("UPDATE group_tags SET tag_name='' WHERE admin_id=%s AND tag_name=%s AND layer_id=%s",
+                      (ADMIN_ID, tag_name, layer_id))
                 else:
-                    u("DELETE FROM account_tags WHERE admin_id=%s AND tag_name=%s",
-                      (ADMIN_ID, tag_name))
+                    u("DELETE FROM account_tags WHERE admin_id=%s AND tag_name=%s AND layer_id=%s",
+                      (ADMIN_ID, tag_name, layer_id))
                 await cb.answer(f"✅ برچسب «{tag_name}» حذف شد", show_alert=True)
-                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category=%s ORDER BY name",
-                         (ADMIN_ID, category))
+                tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category=%s AND layer_id=%s ORDER BY name",
+                         (ADMIN_ID, category, layer_id))
                 tag_list = [t[0] for t in tags]
                 await cb.message.edit_reply_markup(tags_list_kb(tag_list, context))
 
@@ -1414,7 +1593,8 @@ def register(app):
                 acc = q("SELECT name,phone FROM accounts WHERE id=%s", (acc_id,))
                 if not acc:
                     await cb.answer("اکانت یافت نشد", show_alert=True); return
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 if not tag_list:
                     await cb.answer("ابتدا یک برچسب اکانت بسازید (دکمه ➕ برچسب جدید)", show_alert=True)
@@ -1427,15 +1607,16 @@ def register(app):
 
             elif d.startswith("acctagm_tog_"):
                 _, _, acc_id, tag_name = d.split("_", 3)
+                layer_id = get_current_layer()
                 exists = q("SELECT id FROM account_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
                            (ADMIN_ID, acc_id, tag_name))
                 if exists:
                     u("DELETE FROM account_tags WHERE admin_id=%s AND account_id=%s AND tag_name=%s",
                       (ADMIN_ID, acc_id, tag_name))
                 else:
-                    u("INSERT IGNORE INTO account_tags (admin_id,account_id,tag_name) VALUES (%s,%s,%s)",
-                      (ADMIN_ID, acc_id, tag_name))
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' ORDER BY name", (ADMIN_ID,))
+                    u("INSERT IGNORE INTO account_tags (admin_id,account_id,tag_name,layer_id) VALUES (%s,%s,%s,%s)",
+                      (ADMIN_ID, acc_id, tag_name, layer_id))
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='accounts' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 cur = q("SELECT tag_name FROM account_tags WHERE admin_id=%s AND account_id=%s",
                         (ADMIN_ID, acc_id))
@@ -1443,43 +1624,54 @@ def register(app):
                 await cb.message.edit_reply_markup(account_tag_multi_kb(acc_id, tag_list, cur_tags))
 
             elif d == "g_sec":
-                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s AND layer_id=%s",
+                        (ADMIN_ID, layer_id))
                 active = bool(row[0][0]) if row else False
                 await cb.message.edit_text("🤖 **منشی خودکار همگانی**", reply_markup=global_sec_kb(active))
 
             elif d.startswith("gsec_b"):
                 slot = int(d[6])
-                bnrs = q("SELECT slot,text,file_id FROM banners WHERE admin_id=%s AND context='g_secretary' ORDER BY slot", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                gl_id = f"global{layer_id}"
+                bnrs = q("SELECT slot,text,file_id FROM banners WHERE account_id=%s AND context='g_secretary' ORDER BY slot",
+                         (gl_id,))
                 txt = "✏️ **بنرهای همگانی منشی**\n\n"
                 for b in bnrs:
                     txt += f"═-═ {b[0]} ═-═\n💬 [{(b[1] or '')[:40]}...]\n📁 {'✅' if b[2] else '❌'}\n\n"
                 if not bnrs: txt += "هیچ بنری."
-                await cb.message.edit_text(txt, reply_markup=banner_slot_kb("global", slot, "g_secretary"))
+                await cb.message.edit_text(txt, reply_markup=banner_slot_kb(gl_id, slot, "g_secretary"))
 
             elif d == "gsec_tog":
-                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s AND layer_id=%s",
+                        (ADMIN_ID, layer_id))
                 new = 0 if (row and row[0][0]) else 1
-                u("INSERT INTO global_secretary_settings (admin_id,is_active) VALUES(%s,%s) "
-                  "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, new, new))
+                u("INSERT INTO global_secretary_settings (admin_id,layer_id,is_active) VALUES(%s,%s,%s) "
+                  "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, layer_id, new, new))
                 await cb.answer(f"منشی همگانی {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
                 await cb.message.edit_reply_markup(global_sec_kb(bool(new)))
 
             elif d == "gsec_now":
                 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
                 await cb.answer("⚡ در حال بررسی و ارسال...", show_alert=False)
+                layer_id = get_current_layer()
+                gl_id = f"global{layer_id}"
                 g_banners = q(
                     "SELECT text,file_id,file_type FROM banners "
-                    "WHERE admin_id=%s AND context='g_secretary' ORDER BY slot",
-                    (ADMIN_ID,)
+                    "WHERE account_id=%s AND context='g_secretary' ORDER BY slot",
+                    (gl_id,)
                 )
                 if not g_banners:
-                    row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                    row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s AND layer_id=%s",
+                            (ADMIN_ID, layer_id))
                     active = bool(row[0][0]) if row else False
                     await cb.message.edit_text("⚠️ هیچ بنری برای منشی همگانی تنظیم نشده.",
                                                 reply_markup=global_sec_kb(active))
                     return
                 await cb.message.edit_text("🔄 در حال بررسی پی‌وی‌های همه‌ی اکانت‌ها...")
-                accs = q("SELECT id,phone FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+                accs = q("SELECT id,phone FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                         (ADMIN_ID, layer_id))
                 report_lines = []
                 total_new = 0
                 for acc_id, phone in accs:
@@ -1511,38 +1703,41 @@ def register(app):
                         try: await uc.stop()
                         except Exception: pass
 
-                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s", (ADMIN_ID,))
+                row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s AND layer_id=%s",
+                        (ADMIN_ID, layer_id))
                 active = bool(row[0][0]) if row else False
                 txt = f"⚡ **نتیجه ارسال فوری**\n\nجمعاً به {total_new} کاربر جدید پاسخ داده شد.\n\n"
                 txt += "\n".join(report_lines) if report_lines else "هیچ اکانت فعالی یافت نشد."
                 await cb.message.edit_text(txt, reply_markup=global_sec_kb(active))
 
             elif d == "g_rr":
-                row = q("SELECT is_active,interval_minutes,group_tag_filter,acc_tag_filter FROM reply_rand WHERE account_id='global' AND admin_id=%s", (ADMIN_ID,))
+                gl_id = f"global{get_current_layer()}"
+                row = q("SELECT is_active,interval_minutes,group_tag_filter,acc_tag_filter FROM reply_rand WHERE account_id=%s AND admin_id=%s", (gl_id, ADMIN_ID))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 30
                 gtag = (row[0][2] if row else None) or "ALL"
                 atag = (row[0][3] if row else None) or "ALL"
                 await cb.message.edit_text(
                     f"↩️ **ریپلای رندم همگانی**\n\n"
-                    f"این تنظیم برای **همه اکانت‌ها** یکسان اعمال می‌شود؛ "
+                    f"این تنظیم برای **همه اکانت‌های این لایه** یکسان اعمال می‌شود؛ "
                     f"هر اکانت مستقل با همین متن و زمان ریپلای می‌زند.\n\n"
                     f"فاصله: {interval} دقیقه\nوضعیت: {'✅' if active else '❌'}",
-                    reply_markup=reply_rand_kb("global", active, back_to="menu_global", group_tag=gtag, acc_tag=atag)
+                    reply_markup=reply_rand_kb(gl_id, active, back_to="menu_global", group_tag=gtag, acc_tag=atag)
                 )
 
             elif d == "g_rc":
-                row = q("SELECT is_active,interval_minutes,group_tag_filter,acc_tag_filter FROM react_rand WHERE account_id='global' AND admin_id=%s", (ADMIN_ID,))
+                gl_id = f"global{get_current_layer()}"
+                row = q("SELECT is_active,interval_minutes,group_tag_filter,acc_tag_filter FROM react_rand WHERE account_id=%s AND admin_id=%s", (gl_id, ADMIN_ID))
                 active = row[0][0] if row else 0
                 interval = row[0][1] if row else 30
                 gtag = (row[0][2] if row else None) or "ALL"
                 atag = (row[0][3] if row else None) or "ALL"
                 await cb.message.edit_text(
                     f"😀 **ری‌اکت رندم همگانی**\n\n"
-                    f"این تنظیم برای **همه اکانت‌ها** یکسان اعمال می‌شود؛ "
+                    f"این تنظیم برای **همه اکانت‌های این لایه** یکسان اعمال می‌شود؛ "
                     f"هر اکانت مستقل ری‌اکت می‌زند.\n\n"
                     f"فاصله: {interval} دقیقه\nوضعیت: {'✅' if active else '❌'}",
-                    reply_markup=react_rand_kb("global", active, back_to="menu_global", group_tag=gtag, acc_tag=atag)
+                    reply_markup=react_rand_kb(gl_id, active, back_to="menu_global", group_tag=gtag, acc_tag=atag)
                 )
 
             # ══ جوین از پیوی‌ها ══
@@ -1579,7 +1774,8 @@ def register(app):
                 else:
                     links = [r[0] for r in rows]
                     set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
-                    tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                    layer_id = get_current_layer()
+                    tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                     tag_list = [t[0] for t in tags]
                     await cb.message.edit_text(
                         f"✅ **{len(links)} لینک از پیوی‌ها آماده جوین**\n\nبرچسب گروه‌ها را انتخاب کنید:",
@@ -1647,8 +1843,9 @@ def register(app):
             # ══════════════════════════════════════════
 
             elif d == "ld_menu":
+                layer_id = get_current_layer()
                 src_row = q("SELECT COUNT(*) FROM linkdoni_sources "
-                            "WHERE admin_id=%s AND is_active=1", (ADMIN_ID,))
+                            "WHERE admin_id=%s AND is_active=1 AND layer_id=%s", (ADMIN_ID, layer_id))
                 source_count = src_row[0][0] if src_row else 0
                 pend_row = q("SELECT COUNT(*) FROM linkdoni_links "
                              "WHERE admin_id=%s AND joined=0", (ADMIN_ID,))
@@ -1666,9 +1863,10 @@ def register(app):
                 )
 
             elif d == "ld_sources":
+                layer_id = get_current_layer()
                 srcs = q("SELECT id, chat_id, chat_title, is_active "
-                         "FROM linkdoni_sources WHERE admin_id=%s ORDER BY added_at DESC",
-                         (ADMIN_ID,))
+                         "FROM linkdoni_sources WHERE admin_id=%s AND layer_id=%s ORDER BY added_at DESC",
+                         (ADMIN_ID, layer_id))
                 src_list = [{"id": r[0], "chat_id": r[1],
                              "chat_title": r[2], "is_active": r[3]} for r in srcs]
                 await cb.message.edit_text(
@@ -1686,8 +1884,9 @@ def register(app):
                 )
 
             elif d == "ld_src_getall":
+                layer_id = get_current_layer()
                 srcs = q("SELECT chat_title, chat_id, source_link FROM linkdoni_sources "
-                         "WHERE admin_id=%s ORDER BY added_at DESC", (ADMIN_ID,))
+                         "WHERE admin_id=%s AND layer_id=%s ORDER BY added_at DESC", (ADMIN_ID, layer_id))
                 if not srcs:
                     await cb.answer("❌ هیچ لینکدونی‌ای ثبت نشده.", show_alert=True)
                     return
@@ -1728,9 +1927,10 @@ def register(app):
                 src_id = int(d[11:])
                 u("DELETE FROM linkdoni_sources WHERE id=%s AND admin_id=%s",
                   (src_id, ADMIN_ID))
+                layer_id = get_current_layer()
                 srcs = q("SELECT id, chat_id, chat_title, is_active "
-                         "FROM linkdoni_sources WHERE admin_id=%s ORDER BY added_at DESC",
-                         (ADMIN_ID,))
+                         "FROM linkdoni_sources WHERE admin_id=%s AND layer_id=%s ORDER BY added_at DESC",
+                         (ADMIN_ID, layer_id))
                 src_list = [{"id": r[0], "chat_id": r[1],
                              "chat_title": r[2], "is_active": r[3]} for r in srcs]
                 await cb.message.edit_text(
@@ -2191,7 +2391,9 @@ async def _scan_pvs_for_links(bot_client):
 
     LINK_RE = re.compile(r'https?://t\.me/[^\s\]\)"\']+')
 
-    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+    layer_id = get_current_layer()
+    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+             (ADMIN_ID, layer_id))
     total_new = 0
 
     for (acc_id,) in accs:

@@ -9,7 +9,7 @@ from pyrogram.errors import (FloodWait, UserAlreadyParticipant,
 from database import q, u
 from utils import (ADMIN_ID, get_step, get_step_data, set_step,
                    clear_step, get_user_client, save_account, is_stopped, set_stop,
-                   detect_and_handle_bot_forced_join)
+                   detect_and_handle_bot_forced_join, get_current_layer)
 from keyboards import (manage_kb, back_kb, confirm_kb, global_kb, reply_rand_kb,
                        react_rand_kb, reply_banner_list_kb, tag_select_kb,
                        main_menu_kb, global_sch_panel_kb, tags_list_kb)
@@ -99,9 +99,11 @@ def register(app):
         elif step.startswith("gbn_text_"):
             _, _, target, slot = step.split("_", 3)
             slot = int(slot)
+            layer_id = get_current_layer()
             set_step(ADMIN_ID, f"gbn_file_{target}_{slot}", text)
-            u("INSERT INTO global_banners (admin_id,target,slot,text) VALUES(%s,%s,%s,%s) "
-              "ON DUPLICATE KEY UPDATE text=%s", (ADMIN_ID, target, slot, text, text))
+            u("INSERT INTO global_banners (admin_id,target,slot,text,layer_id) "
+              "VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE text=%s",
+              (ADMIN_ID, target, slot, text, layer_id, text))
             await message.reply(
                 "📎 فایل پیوست بفرستید یا بدون فایل ادامه دهید:",
                 reply_markup=back_kb(f"gbn_back_{target}")
@@ -202,7 +204,8 @@ def register(app):
                 return
             # ذخیره لینک‌ها و رفتن به مرحله انتخاب برچسب
             set_step(ADMIN_ID, f"join_tag_{acc_id}", "\n".join(links))
-            tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+            layer_id = get_current_layer()
+            tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
             tag_list = [t[0] for t in tags]
             await message.reply(
                 f"✅ **{len(links)} لینک دریافت شد**\n\nبرچسب گروه‌ها را انتخاب کنید:",
@@ -236,11 +239,12 @@ def register(app):
             target = step[9:]
             if not text.isdigit() or int(text) < 1:
                 await message.reply("❌ عدد دقیقه وارد کنید."); return
-            u("INSERT INTO global_scheduler (admin_id,target,interval_minutes) "
-              "VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE interval_minutes=%s",
-              (ADMIN_ID, target, int(text), int(text)))
+            layer_id = get_current_layer()
+            u("INSERT INTO global_scheduler (admin_id,target,layer_id,interval_minutes) "
+              "VALUES(%s,%s,%s,%s) ON DUPLICATE KEY UPDATE interval_minutes=%s",
+              (ADMIN_ID, target, layer_id, int(text), int(text)))
             row = q("SELECT is_active,group_tag_filter,acc_tag_filter,max_rounds,current_round "
-                    "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                    "FROM global_scheduler WHERE admin_id=%s AND target=%s AND layer_id=%s", (ADMIN_ID, target, layer_id))
             active = row[0][0] if row else 0
             gtag = (row[0][1] if row else None) or "ALL"
             atag = (row[0][2] if row else None) or "ALL"
@@ -256,11 +260,12 @@ def register(app):
             if not text.isdigit() or int(text) < 0:
                 await message.reply("❌ عدد معتبر وارد کنید (۰ = نامحدود)."); return
             rounds = int(text)
-            u("INSERT INTO global_scheduler (admin_id,target,max_rounds,current_round) "
-              "VALUES(%s,%s,%s,0) ON DUPLICATE KEY UPDATE max_rounds=%s, current_round=0",
-              (ADMIN_ID, target, rounds, rounds))
+            layer_id = get_current_layer()
+            u("INSERT INTO global_scheduler (admin_id,target,layer_id,max_rounds,current_round) "
+              "VALUES(%s,%s,%s,%s,0) ON DUPLICATE KEY UPDATE max_rounds=%s, current_round=0",
+              (ADMIN_ID, target, layer_id, rounds, rounds))
             row = q("SELECT is_active,group_tag_filter,acc_tag_filter,max_rounds,current_round "
-                    "FROM global_scheduler WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
+                    "FROM global_scheduler WHERE admin_id=%s AND target=%s AND layer_id=%s", (ADMIN_ID, target, layer_id))
             active = row[0][0] if row else 0
             gtag = (row[0][1] if row else None) or "ALL"
             atag = (row[0][2] if row else None) or "ALL"
@@ -279,15 +284,50 @@ def register(app):
         elif step == "g_lname":
             await _global_profile(message, "lname", text)
 
+        elif step == "layer_new":
+            name = text.strip()
+            if not name or len(name) > 50:
+                await message.reply("❌ نام لایه باید بین ۱ تا ۵۰ کاراکتر باشد."); return
+            try:
+                u("INSERT INTO layers (admin_id,name) VALUES(%s,%s)", (ADMIN_ID, name))
+                new_lyr = q("SELECT id FROM layers WHERE admin_id=%s AND name=%s", (ADMIN_ID, name))
+                new_layer_id = new_lyr[0][0]
+                u("UPDATE admins SET current_layer_id=%s WHERE id=%s", (new_layer_id, ADMIN_ID))
+                await message.reply(
+                    f"✅ لایه‌ی «{name}» ساخته و فعال شد.\n\nیک گزینه را انتخاب کنید:",
+                    reply_markup=main_menu_kb()
+                )
+            except Exception:
+                await message.reply(f"❌ لایه‌ای با نام «{name}» از قبل وجود دارد.")
+            clear_step(ADMIN_ID)
+
+        elif step.startswith("layer_ren_"):
+            layer_id = step[10:]
+            new_name = text.strip()
+            if not new_name or len(new_name) > 50:
+                await message.reply("❌ نام لایه باید بین ۱ تا ۵۰ کاراکتر باشد."); return
+            try:
+                u("UPDATE layers SET name=%s WHERE id=%s AND admin_id=%s",
+                  (new_name, layer_id, ADMIN_ID))
+                from keyboards import layer_manage_kb
+                await message.reply(
+                    f"✅ نام لایه به «{new_name}» تغییر کرد.",
+                    reply_markup=layer_manage_kb(layer_id)
+                )
+            except Exception:
+                await message.reply(f"❌ لایه‌ای با نام «{new_name}» از قبل وجود دارد.")
+            clear_step(ADMIN_ID)
+
         elif step.startswith("tag_new_"):
             context = step[8:]
             category = "accounts" if context == "accounts" else "groups"
+            layer_id = get_current_layer()
             tag_name = text.strip()
             if not tag_name or len(tag_name) > 50:
                 await message.reply("❌ نام برچسب باید بین ۱ تا ۵۰ کاراکتر باشد."); return
             try:
-                u("INSERT INTO tags (admin_id,name,category) VALUES(%s,%s,%s)",
-                  (ADMIN_ID, tag_name, category))
+                u("INSERT INTO tags (admin_id,name,category,layer_id) VALUES(%s,%s,%s,%s)",
+                  (ADMIN_ID, tag_name, category, layer_id))
                 if category == "accounts":
                     from keyboards import account_tag_kb
                     accs = q(
@@ -295,14 +335,14 @@ def register(app):
                         "GROUP_CONCAT(at.tag_name ORDER BY at.tag_name SEPARATOR ', ') "
                         "FROM accounts a "
                         "LEFT JOIN account_tags at ON at.account_id=a.id AND at.admin_id=a.admin_id "
-                        "WHERE a.admin_id=%s GROUP BY a.id, a.name, a.phone",
-                        (ADMIN_ID,)
+                        "WHERE a.admin_id=%s AND a.layer_id=%s GROUP BY a.id, a.name, a.phone",
+                        (ADMIN_ID, layer_id)
                     )
                     await message.reply(f"✅ برچسب «{tag_name}» ساخته شد.\n\nحالا اکانتی رو انتخاب کن تا بهش این برچسب رو بزنی:",
                                          reply_markup=account_tag_kb(accs))
                 else:
-                    tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name",
-                             (ADMIN_ID,))
+                    tags = q("SELECT DISTINCT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name",
+                             (ADMIN_ID, layer_id))
                     tag_list = [t[0] for t in tags]
                     await message.reply(f"✅ برچسب «{tag_name}» ساخته شد.",
                                          reply_markup=tags_list_kb(tag_list, context))
@@ -455,7 +495,8 @@ def register(app):
                 )
             else:
                 set_step(ADMIN_ID, "g_join_tag", "\n".join(links))
-                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' ORDER BY name", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                tags = q("SELECT name FROM tags WHERE admin_id=%s AND category='groups' AND layer_id=%s ORDER BY name", (ADMIN_ID, layer_id))
                 tag_list = [t[0] for t in tags]
                 await message.reply(
                     f"✅ {len(links)} لینک دریافت شد.\nبرچسب گروه‌ها را انتخاب کنید:",
@@ -470,7 +511,7 @@ def register(app):
             u("INSERT INTO reply_rand_banners (account_id,admin_id,slot,text) VALUES(%s,%s,%s,%s)",
               (acc_id, ADMIN_ID, next_slot, text))
             bnrs = q("SELECT slot,text,file_id FROM reply_rand_banners WHERE account_id=%s ORDER BY slot", (acc_id,))
-            back = "g_rr" if acc_id == "global" else f"m_reply_{acc_id}"
+            back = "g_rr" if acc_id.startswith("global") else f"m_reply_{acc_id}"
             await message.reply(f"✅ متن {next_slot} اضافه شد.",
                                  reply_markup=reply_banner_list_kb(acc_id, bnrs, back_to=back))
             clear_step(ADMIN_ID)
@@ -483,7 +524,7 @@ def register(app):
               "ON DUPLICATE KEY UPDATE interval_minutes=%s", (acc_id, ADMIN_ID, int(text), int(text)))
             row = q("SELECT is_active FROM reply_rand WHERE account_id=%s", (acc_id,))
             active = row[0][0] if row else 0
-            back = "menu_global" if acc_id == "global" else None
+            back = "menu_global" if acc_id.startswith("global") else None
             await message.reply(f"✅ هر {text} دقیقه ریپلای.", reply_markup=reply_rand_kb(acc_id, active, back_to=back))
             clear_step(ADMIN_ID)
 
@@ -495,7 +536,7 @@ def register(app):
               "ON DUPLICATE KEY UPDATE interval_minutes=%s", (acc_id, ADMIN_ID, int(text), int(text)))
             row = q("SELECT is_active FROM react_rand WHERE account_id=%s", (acc_id,))
             active = row[0][0] if row else 0
-            back = "menu_global" if acc_id == "global" else None
+            back = "menu_global" if acc_id.startswith("global") else None
             await message.reply(f"✅ هر {text} دقیقه ری‌اکت.", reply_markup=react_rand_kb(acc_id, active, back_to=back))
             clear_step(ADMIN_ID)
 
@@ -509,6 +550,7 @@ def register(app):
         if step.startswith("gbn_file_"):
             _, _, target, slot = step.split("_", 3)
             slot = int(slot)
+            layer_id = get_current_layer()
             if message.photo:
                 fid, ftype = message.photo.file_id, "photo"
             elif message.video:
@@ -518,8 +560,8 @@ def register(app):
             else:
                 return
             u("UPDATE global_banners SET file_id=%s, file_type=%s "
-              "WHERE admin_id=%s AND target=%s AND slot=%s",
-              (fid, ftype, ADMIN_ID, target, slot))
+              "WHERE admin_id=%s AND target=%s AND slot=%s AND layer_id=%s",
+              (fid, ftype, ADMIN_ID, target, slot, layer_id))
             await message.reply("✅ پیام با فایل ذخیره شد.", reply_markup=back_kb(f"gbn_back_{target}"))
             clear_step(ADMIN_ID)
             return
@@ -562,7 +604,8 @@ async def _handle_login_result(message, result, err, phone):
         return
     me, ss = result
     save_account(me, ss, phone)
-    cnt = q("SELECT COUNT(*) FROM accounts WHERE admin_id=%s", (ADMIN_ID,))[0][0]
+    cnt = q("SELECT COUNT(*) FROM accounts WHERE admin_id=%s AND layer_id=%s",
+            (ADMIN_ID, get_current_layer()))[0][0]
     await message.reply(
         f"✅ **اکانت اضافه شد!**\n\n"
         f"👤 {me.first_name or ''} {me.last_name or ''}\n"
@@ -593,11 +636,13 @@ async def _profile_action(message, acc_id, action, value):
     clear_step(ADMIN_ID)
 
 async def _add_linkdoni_sources_bulk(bot_client, lines):
-    """افزودن دسته‌ای لینکدونی‌ها (مشابه عضویت گروهی)"""
+    """افزودن دسته‌ای لینکدونی‌ها (مشابه عضویت گروهی) — مخصوص لایه‌ی فعلی"""
     import random as _random
-    accs_ld = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+    layer_id = get_current_layer()
+    accs_ld = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                (ADMIN_ID, layer_id))
     if not accs_ld:
-        await bot_client.send_message(ADMIN_ID, "❌ هیچ اکانت فعالی وجود ندارد.")
+        await bot_client.send_message(ADMIN_ID, "❌ هیچ اکانت فعالی تو این لایه وجود ندارد.")
         return
 
     acc_id_ld = str(_random.choice(accs_ld)[0])
@@ -652,8 +697,8 @@ async def _add_linkdoni_sources_bulk(bot_client, lines):
 
             try:
                 u("INSERT IGNORE INTO linkdoni_sources "
-                  "(admin_id, chat_id, chat_title, source_link) VALUES (%s,%s,%s,%s)",
-                  (ADMIN_ID, real_id, title[:200], raw[:300]))
+                  "(admin_id, chat_id, chat_title, source_link, layer_id) VALUES (%s,%s,%s,%s,%s)",
+                  (ADMIN_ID, real_id, title[:200], raw[:300], layer_id))
                 ok += 1
                 await bot_client.send_message(ADMIN_ID, f"✅ [{i}/{len(lines)}] افزوده شد: {title}")
             except Exception as ex:
@@ -673,8 +718,8 @@ async def _add_linkdoni_sources_bulk(bot_client, lines):
 
     from keyboards import ld_sources_kb
     srcs = q("SELECT id, chat_id, chat_title, is_active "
-             "FROM linkdoni_sources WHERE admin_id=%s ORDER BY added_at DESC",
-             (ADMIN_ID,))
+             "FROM linkdoni_sources WHERE admin_id=%s AND layer_id=%s ORDER BY added_at DESC",
+             (ADMIN_ID, layer_id))
     src_list = [{"id": r[0], "chat_id": r[1],
                  "chat_title": r[2], "is_active": r[3]} for r in srcs]
     await bot_client.send_message(
@@ -768,6 +813,8 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
     ok_links, fail_links = [], []
     row = q("SELECT auto_leave_limited FROM accounts WHERE id=%s", (acc_id,))
     auto_leave = row[0][0] if row else 0
+    lyr_row = q("SELECT layer_id FROM accounts WHERE id=%s", (acc_id,))
+    acc_layer_id = lyr_row[0][0] if lyr_row and lyr_row[0][0] else 0
 
     for i, link in enumerate(links, 1):
         if is_stopped():
@@ -792,9 +839,9 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
             # ذخیره گروه با برچسب
             if result and hasattr(result, 'id'):
                 chat_title = getattr(result, 'title', '') or ''
-                u("INSERT INTO group_tags (admin_id,account_id,chat_id,chat_title,tag_name) "
-                  "VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE tag_name=%s, chat_title=%s",
-                  (ADMIN_ID, acc_id, result.id, chat_title, tag, tag, chat_title))
+                u("INSERT INTO group_tags (admin_id,account_id,chat_id,chat_title,tag_name,layer_id) "
+                  "VALUES(%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE tag_name=%s, chat_title=%s",
+                  (ADMIN_ID, acc_id, result.id, chat_title, tag, acc_layer_id, tag, chat_title))
                 # چک عضویت اجباری بات‌محور (ربات گروه ممکنه بخواد کانال دیگه‌ای رو هم جوین کنیم)
                 try:
                     fj_result = await detect_and_handle_bot_forced_join(uc, result.id)
@@ -837,9 +884,9 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
                 ok_links.append(link)
                 if result and hasattr(result, 'id'):
                     chat_title = getattr(result, 'title', '') or ''
-                    u("INSERT INTO group_tags (admin_id,account_id,chat_id,chat_title,tag_name) "
-                      "VALUES(%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE tag_name=%s, chat_title=%s",
-                      (ADMIN_ID, acc_id, result.id, chat_title, tag, tag, chat_title))
+                    u("INSERT INTO group_tags (admin_id,account_id,chat_id,chat_title,tag_name,layer_id) "
+                      "VALUES(%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE tag_name=%s, chat_title=%s",
+                      (ADMIN_ID, acc_id, result.id, chat_title, tag, acc_layer_id, tag, chat_title))
             except Exception:
                 fail_links.append(link)
 
@@ -896,15 +943,17 @@ async def _join_links(bot_client, acc_id, links, min_d, max_d, tag=""):
 
 
 def get_filtered_accounts(tag_filter):
-    """اکانت‌های فیلترشده بر اساس برچسب"""
+    """اکانت‌های فیلترشده بر اساس برچسب (فقط در لایه‌ی فعلی)"""
+    layer_id = get_current_layer()
     if tag_filter == "ALL":
-        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                  (ADMIN_ID, layer_id))
     elif tag_filter == "NOTAG":
-        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
-                 "AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s "
+                 "AND (tag='' OR tag IS NULL)", (ADMIN_ID, layer_id))
     else:
-        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND tag=%s",
-                 (ADMIN_ID, tag_filter))
+        return q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s AND tag=%s",
+                 (ADMIN_ID, layer_id, tag_filter))
 
 def get_filtered_chat_ids(acc_id, tag_filter):
     """
@@ -1055,7 +1104,9 @@ async def send_to_groups_smart(bot_client, acc_id, text, force_join=False, group
 
 
 async def _global_profile(message, action, value):
-    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+    layer_id = get_current_layer()
+    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+             (ADMIN_ID, layer_id))
     ok = fail = 0
     for (aid,) in accs:
         uc = await get_user_client(aid)
