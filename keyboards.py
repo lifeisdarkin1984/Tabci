@@ -5,7 +5,34 @@ def main_menu_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚙️ دستورات تبچی", callback_data="menu_tabchi"),
          InlineKeyboardButton("🌐 مدیریت همگانی", callback_data="menu_global")],
+        [InlineKeyboardButton("🔁 تغییر لایه", callback_data="layers_menu")],
     ])
+
+# ─── انتخاب لایه ────────────────────────────────────────────
+def layers_kb(layers):
+    """layers: لیست تاپل‌های (id, name, account_count)"""
+    rows = []
+    for lid, name, cnt in layers:
+        rows.append([
+            InlineKeyboardButton(f"🔷 {name} ({cnt})", callback_data=f"layer_sel_{lid}"),
+            InlineKeyboardButton("⚙️", callback_data=f"layer_mng_{lid}"),
+        ])
+    rows.append([InlineKeyboardButton("➕ ساخت لایه جدید", callback_data="layer_new")])
+    return InlineKeyboardMarkup(rows)
+
+def layer_manage_kb(layer_id):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ تغییر نام", callback_data=f"layer_ren_{layer_id}")],
+        [InlineKeyboardButton("🗑 حذف لایه", callback_data=f"layer_del_{layer_id}")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="layers_menu")],
+    ])
+
+def layer_move_kb(acc_id, layers):
+    """layers: لیست تاپل‌های (id, name) — لایه‌های مقصد ممکن"""
+    rows = [[InlineKeyboardButton(f"🔷 {name}", callback_data=f"acc_movelyr_do_{acc_id}_{lid}")]
+            for lid, name in layers]
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data=f"acc_manage_{acc_id}")])
+    return InlineKeyboardMarkup(rows)
 
 # ─── لیست اکانت‌ها ──────────────────────────────────────────
 def tabchi_list_kb(accounts):
@@ -48,6 +75,7 @@ def manage_kb(acc_id):
          InlineKeyboardButton("🆔 تنظیم آیدی",      callback_data=f"m_uname_{acc_id}")],
         [InlineKeyboardButton("👤 تنظیم نام",        callback_data=f"m_fname_{acc_id}"),
          InlineKeyboardButton("👤 تنظیم فامیلی",    callback_data=f"m_lname_{acc_id}")],
+        [InlineKeyboardButton("📦 انتقال به لایه‌ی دیگر", callback_data=f"acc_movelyr_{acc_id}")],
         [InlineKeyboardButton("🔙 بازگشت",           callback_data=f"acc_sel_{acc_id}")],
     ])
 

@@ -35,7 +35,8 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS admins (
             id BIGINT PRIMARY KEY,
             step VARCHAR(150) DEFAULT 'idle',
-            step_data MEDIUMTEXT
+            step_data MEDIUMTEXT,
+            current_layer_id INT DEFAULT NULL
         )""",
         """CREATE TABLE IF NOT EXISTS accounts (
             id VARCHAR(50) PRIMARY KEY,
@@ -46,7 +47,15 @@ def init_db():
             admin_id BIGINT,
             status VARCHAR(20) DEFAULT 'active',
             added_at BIGINT DEFAULT 0,
-            auto_leave_limited TINYINT DEFAULT 0
+            auto_leave_limited TINYINT DEFAULT 0,
+            layer_id INT DEFAULT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS layers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            admin_id BIGINT,
+            name VARCHAR(100) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_layer (admin_id, name)
         )""",
         """CREATE TABLE IF NOT EXISTS pending_logins (
             phone VARCHAR(30) PRIMARY KEY,
@@ -87,8 +96,10 @@ def init_db():
             replied_users MEDIUMTEXT
         )""",
         """CREATE TABLE IF NOT EXISTS global_secretary_settings (
-            admin_id BIGINT PRIMARY KEY,
-            is_active TINYINT DEFAULT 0
+            admin_id BIGINT,
+            layer_id INT NOT NULL DEFAULT 0,
+            is_active TINYINT DEFAULT 0,
+            PRIMARY KEY (admin_id, layer_id)
         )""",
         """CREATE TABLE IF NOT EXISTS join_settings (
             account_id VARCHAR(50) PRIMARY KEY,
@@ -132,7 +143,8 @@ def init_db():
             admin_id BIGINT,
             name VARCHAR(100) NOT NULL,
             category VARCHAR(20) DEFAULT 'groups',
-            UNIQUE KEY uniq_tag (admin_id, name, category)
+            layer_id INT NOT NULL DEFAULT 0,
+            UNIQUE KEY uniq_tag (admin_id, name, category, layer_id)
         )""",
         """CREATE TABLE IF NOT EXISTS group_tags (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -141,6 +153,7 @@ def init_db():
             chat_id BIGINT,
             chat_title VARCHAR(255) DEFAULT '',
             tag_name VARCHAR(100) DEFAULT '',
+            layer_id INT NOT NULL DEFAULT 0,
             UNIQUE KEY uniq_group (admin_id, account_id, chat_id)
         )""",
         """CREATE TABLE IF NOT EXISTS account_tags (
@@ -148,6 +161,7 @@ def init_db():
             admin_id BIGINT,
             account_id VARCHAR(50),
             tag_name VARCHAR(100) DEFAULT '',
+            layer_id INT NOT NULL DEFAULT 0,
             UNIQUE KEY uniq_acctag (admin_id, account_id, tag_name)
         )""",
         """CREATE TABLE IF NOT EXISTS global_scheduler (
@@ -161,7 +175,8 @@ def init_db():
             acc_tag_filter VARCHAR(100) DEFAULT 'ALL',
             max_rounds INT DEFAULT 0,
             current_round INT DEFAULT 0,
-            PRIMARY KEY (admin_id, target)
+            layer_id INT NOT NULL DEFAULT 0,
+            PRIMARY KEY (admin_id, target, layer_id)
         )""",
         """CREATE TABLE IF NOT EXISTS global_banners (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -171,7 +186,8 @@ def init_db():
             text MEDIUMTEXT,
             file_id VARCHAR(300) DEFAULT '',
             file_type VARCHAR(30) DEFAULT '',
-            UNIQUE KEY uniq_slot (admin_id, target, slot)
+            layer_id INT NOT NULL DEFAULT 0,
+            UNIQUE KEY uniq_slot (admin_id, target, slot, layer_id)
         )""",
         """CREATE TABLE IF NOT EXISTS used_links (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -206,7 +222,8 @@ def init_db():
             last_scan TIMESTAMP NULL,
             is_active TINYINT DEFAULT 1,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY uniq_source (admin_id, chat_id)
+            layer_id INT NOT NULL DEFAULT 0,
+            UNIQUE KEY uniq_source (admin_id, chat_id, layer_id)
         )""",
         """CREATE TABLE IF NOT EXISTS linkdoni_links (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -261,6 +278,15 @@ def init_db():
         ("accounts", "last_sys_msg_id", "BIGINT DEFAULT 0"),
         ("linkdoni_sources", "source_link", "VARCHAR(300) DEFAULT ''"),
         ("tags", "category", "VARCHAR(20) DEFAULT 'groups'"),
+        ("admins", "current_layer_id", "INT DEFAULT NULL"),
+        ("accounts", "layer_id", "INT DEFAULT NULL"),
+        ("global_secretary_settings", "layer_id", "INT NOT NULL DEFAULT 0"),
+        ("tags", "layer_id", "INT NOT NULL DEFAULT 0"),
+        ("group_tags", "layer_id", "INT NOT NULL DEFAULT 0"),
+        ("account_tags", "layer_id", "INT NOT NULL DEFAULT 0"),
+        ("global_scheduler", "layer_id", "INT NOT NULL DEFAULT 0"),
+        ("global_banners", "layer_id", "INT NOT NULL DEFAULT 0"),
+        ("linkdoni_sources", "layer_id", "INT NOT NULL DEFAULT 0"),
     ]
     for table, col, definition in new_columns:
         if not column_exists(table, col):
@@ -276,6 +302,61 @@ def init_db():
                     try:
                         cur.execute(
                             "ALTER TABLE tags ADD UNIQUE KEY uniq_tag (admin_id, name, category)"
+                        )
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                elif table == "tags" and col == "layer_id":
+                    try:
+                        cur.execute("ALTER TABLE tags DROP INDEX uniq_tag")
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                    try:
+                        cur.execute(
+                            "ALTER TABLE tags ADD UNIQUE KEY uniq_tag (admin_id, name, category, layer_id)"
+                        )
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                elif table == "global_secretary_settings" and col == "layer_id":
+                    try:
+                        cur.execute("ALTER TABLE global_secretary_settings DROP PRIMARY KEY")
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                    try:
+                        cur.execute(
+                            "ALTER TABLE global_secretary_settings ADD PRIMARY KEY (admin_id, layer_id)"
+                        )
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                elif table == "global_scheduler" and col == "layer_id":
+                    try:
+                        cur.execute("ALTER TABLE global_scheduler DROP PRIMARY KEY")
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                    try:
+                        cur.execute(
+                            "ALTER TABLE global_scheduler ADD PRIMARY KEY (admin_id, target, layer_id)"
+                        )
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                elif table == "global_banners" and col == "layer_id":
+                    try:
+                        cur.execute("ALTER TABLE global_banners DROP INDEX uniq_slot")
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                    try:
+                        cur.execute(
+                            "ALTER TABLE global_banners ADD UNIQUE KEY uniq_slot (admin_id, target, slot, layer_id)"
+                        )
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                elif table == "linkdoni_sources" and col == "layer_id":
+                    try:
+                        cur.execute("ALTER TABLE linkdoni_sources DROP INDEX uniq_source")
+                    except Exception as e:
+                        print(f"[DB init] {e}")
+                    try:
+                        cur.execute(
+                            "ALTER TABLE linkdoni_sources ADD UNIQUE KEY uniq_source (admin_id, chat_id, layer_id)"
                         )
                     except Exception as e:
                         print(f"[DB init] {e}")
@@ -321,6 +402,46 @@ def init_db():
             print(f"[DB init] banners deduplicated ({deleted} removed) + UNIQUE KEY added")
     except Exception as e:
         print(f"[DB init] banners migration: {e}")
+
+    # ── سیستم لایه‌بندی: ساخت لایه‌ی پیش‌فرض و مهاجرت اکانت‌ها/تنظیمات به آن ──
+    try:
+        admin_id_env = int(os.environ.get("ADMIN_ID", 0))
+    except Exception:
+        admin_id_env = 0
+    if admin_id_env:
+        try:
+            cur.execute("SELECT id FROM layers WHERE admin_id=%s ORDER BY id LIMIT 1", (admin_id_env,))
+            first_layer = cur.fetchone()
+            if not first_layer:
+                cur.execute("INSERT INTO layers (admin_id, name) VALUES (%s,%s)",
+                            (admin_id_env, "لایه ۱"))
+                default_layer_id = cur.lastrowid
+                print(f"[DB init] لایه‌ی پیش‌فرض ساخته شد (layer_id={default_layer_id})")
+            else:
+                default_layer_id = first_layer[0]
+
+            cur.execute(
+                "UPDATE accounts SET layer_id=%s WHERE admin_id=%s AND layer_id IS NULL",
+                (default_layer_id, admin_id_env)
+            )
+            for tbl in ["global_secretary_settings", "tags", "group_tags", "account_tags",
+                        "global_scheduler", "global_banners", "linkdoni_sources"]:
+                try:
+                    cur.execute(
+                        f"UPDATE {tbl} SET layer_id=%s WHERE admin_id=%s AND layer_id=0",
+                        (default_layer_id, admin_id_env)
+                    )
+                except Exception as e:
+                    print(f"[DB init] layer backfill {tbl}: {e}")
+
+            # current_layer_id فقط اگه هنوز ست نشده مقداردهی بشه، نه هر بار ربات بالا میاد
+            cur.execute(
+                "INSERT INTO admins (id, current_layer_id) VALUES (%s,%s) "
+                "ON DUPLICATE KEY UPDATE current_layer_id=COALESCE(current_layer_id, %s)",
+                (admin_id_env, default_layer_id, default_layer_id)
+            )
+        except Exception as e:
+            print(f"[DB init] layer migration: {e}")
 
     db.commit()
     db.close()

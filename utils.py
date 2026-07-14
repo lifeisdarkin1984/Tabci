@@ -8,6 +8,11 @@ API_ID   = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 ADMIN_ID = int(os.environ["ADMIN_ID"])
 
+def get_current_layer():
+    """لایه‌ای که ادمین الان توش ایستاده"""
+    r = q("SELECT current_layer_id FROM admins WHERE id=%s", (ADMIN_ID,))
+    return r[0][0] if r and r[0][0] else 0
+
 def get_step(uid):
     r = q("SELECT step FROM admins WHERE id=%s", (uid,))
     return r[0][0] if r else "idle"
@@ -38,11 +43,13 @@ async def get_user_client(acc_id):
     )
 
 def save_account(me, session_string, phone):
-    u("INSERT INTO accounts (id,phone,name,username,session_string,admin_id,added_at) "
-      "VALUES(%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE "
+    lyr = q("SELECT current_layer_id FROM admins WHERE id=%s", (ADMIN_ID,))
+    layer_id = lyr[0][0] if lyr and lyr[0][0] else None
+    u("INSERT INTO accounts (id,phone,name,username,session_string,admin_id,added_at,layer_id) "
+      "VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE "
       "name=%s, session_string=%s, status='active'",
       (str(me.id), phone, me.first_name or str(me.id), me.username or "",
-       session_string, ADMIN_ID, int(time.time()),
+       session_string, ADMIN_ID, int(time.time()), layer_id,
        me.first_name or str(me.id), session_string))
 
 async def clear_chat_history(uc, chat_id, revoke=False):
