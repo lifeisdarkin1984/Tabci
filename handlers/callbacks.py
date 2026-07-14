@@ -400,7 +400,17 @@ def register(app):
                     u("INSERT INTO join_settings (account_id,admin_id,force_join_active) "
                       "VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE force_join_active=%s",
                       (aid, ADMIN_ID, new, new))
-                await cb.answer(f"عضویت اجبار {'فعال' if new else 'غیرفعال'} برای همه", show_alert=True)
+                await cb.answer(f"عضویت اجبار {'فعال' if new else 'غیرفعال'} شد")
+                await cb.message.edit_text(
+                    f"🕵️ **عضویت اجبار (همگانی)**\n\n"
+                    f"وضعیت: {'✅ فعال' if new else '❌ غیرفعال'}",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            f"{'🔴 غیرفعال' if new else '🟢 فعال'} برای همه",
+                            callback_data="g_fj_tog")],
+                        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")]
+                    ])
+                )
 
             # ══ منشی خودکار ══
             elif d.startswith("m_sec_"):
@@ -1299,7 +1309,10 @@ def register(app):
                 clear_step(ADMIN_ID)
 
             elif d == "g_fj":
-                row = q("SELECT force_join_active FROM join_settings WHERE admin_id=%s LIMIT 1", (ADMIN_ID,))
+                layer_id = get_current_layer()
+                row = q("SELECT force_join_active FROM join_settings WHERE admin_id=%s "
+                        "AND account_id IN (SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s) LIMIT 1",
+                        (ADMIN_ID, ADMIN_ID, layer_id))
                 active = row[0][0] if row else 0
                 await cb.message.edit_text(
                     f"🕵️ **عضویت اجبار (همگانی)**\n\n"
