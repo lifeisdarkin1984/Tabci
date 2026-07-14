@@ -126,58 +126,60 @@ async def run():
                     try: await uc.stop()
                     except Exception: pass
 
-            # ── منشی همگانی ──
-            g_active = q(
-                "SELECT is_active FROM global_secretary_settings WHERE admin_id=%s",
+            # ── منشی همگانی (هر لایه مستقل) ──
+            g_layers = q(
+                "SELECT layer_id FROM global_secretary_settings WHERE admin_id=%s AND is_active=1",
                 (ADMIN_ID,)
             )
-            if g_active and g_active[0][0]:
+            for (g_layer_id,) in g_layers:
+                gl_id = f"global{g_layer_id}"
                 g_banners = q(
                     "SELECT text,file_id,file_type FROM banners "
-                    "WHERE admin_id=%s AND context='g_secretary' ORDER BY slot",
-                    (ADMIN_ID,)
+                    "WHERE account_id=%s AND context='g_secretary' ORDER BY slot",
+                    (gl_id,)
                 )
-                if g_banners:
-                    accs = q(
-                        "SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
-                        (ADMIN_ID,)
+                if not g_banners:
+                    continue
+                accs = q(
+                    "SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                    (ADMIN_ID, g_layer_id)
+                )
+                for (acc_id,) in accs:
+                    # چک اگه این اکانت منشی تک‌اکانت داره، از اون استفاده نکن
+                    has_own = q(
+                        "SELECT COUNT(*) FROM secretary WHERE account_id=%s AND is_active=1",
+                        (acc_id,)
                     )
-                    for (acc_id,) in accs:
-                        # چک اگه این اکانت منشی تک‌اکانت داره، از اون استفاده نکن
-                        has_own = q(
-                            "SELECT COUNT(*) FROM secretary WHERE account_id=%s AND is_active=1",
-                            (acc_id,)
-                        )
-                        if has_own and has_own[0][0] > 0:
-                            continue
-                        g_replied_row = q(
-                            "SELECT replied_users FROM secretary "
-                            "WHERE account_id=%s",
-                            (f"g_{acc_id}",)
-                        )
-                        g_replied = set(g_replied_row[0][0].split(",")) if (g_replied_row and g_replied_row[0][0]) else set()
-                        uc = await get_user_client(acc_id)
-                        if not uc:
-                            continue
-                        try:
-                            await uc.start()
-                            g_replied, g_new_replied = await _reply_to_pvs(uc, acc_id, g_banners, g_replied)
-                            await uc.stop()
-                            u("INSERT INTO secretary (account_id,admin_id,is_active,replied_users) "
-                              "VALUES(%s,%s,0,%s) ON DUPLICATE KEY UPDATE replied_users=%s",
-                              (f"g_{acc_id}", ADMIN_ID, ",".join(g_replied), ",".join(g_replied)))
-                            if g_new_replied:
-                                phone_row = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
-                                phone = phone_row[0][0] if phone_row else acc_id
-                                await _report(f"🤖 منشی همگانی [{phone}]: به {len(g_new_replied)} کاربر جدید پاسخ داده شد.")
-                        except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
-                            u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
-                            try: await uc.stop()
-                            except Exception: pass
-                        except Exception as e:
-                            print(f"[Secretary Global] خطا در {acc_id}: {e}")
-                            try: await uc.stop()
-                            except Exception: pass
+                    if has_own and has_own[0][0] > 0:
+                        continue
+                    g_replied_row = q(
+                        "SELECT replied_users FROM secretary "
+                        "WHERE account_id=%s",
+                        (f"g_{acc_id}",)
+                    )
+                    g_replied = set(g_replied_row[0][0].split(",")) if (g_replied_row and g_replied_row[0][0]) else set()
+                    uc = await get_user_client(acc_id)
+                    if not uc:
+                        continue
+                    try:
+                        await uc.start()
+                        g_replied, g_new_replied = await _reply_to_pvs(uc, acc_id, g_banners, g_replied)
+                        await uc.stop()
+                        u("INSERT INTO secretary (account_id,admin_id,is_active,replied_users) "
+                          "VALUES(%s,%s,0,%s) ON DUPLICATE KEY UPDATE replied_users=%s",
+                          (f"g_{acc_id}", ADMIN_ID, ",".join(g_replied), ",".join(g_replied)))
+                        if g_new_replied:
+                            phone_row = q("SELECT phone FROM accounts WHERE id=%s", (acc_id,))
+                            phone = phone_row[0][0] if phone_row else acc_id
+                            await _report(f"🤖 منشی همگانی [لایه {g_layer_id} | {phone}]: به {len(g_new_replied)} کاربر جدید پاسخ داده شد.")
+                    except (AuthKeyUnregistered, UserDeactivated, SessionExpired):
+                        u("UPDATE accounts SET status='inactive' WHERE id=%s", (acc_id,))
+                        try: await uc.stop()
+                        except Exception: pass
+                    except Exception as e:
+                        print(f"[Secretary Global] خطا در {acc_id} (لایه {g_layer_id}): {e}")
+                        try: await uc.stop()
+                        except Exception: pass
 
         except Exception as e:
             print(f"[Secretary] خطای کلی: {e}")

@@ -65,27 +65,31 @@ async def _get_history(uc, target, limit=500):
 
 async def scan_linkdonis(triggered_by="auto"):
     """
-    اسکن همه لینکدونی‌های فعال و استخراج لینک‌های جدید.
+    اسکن همه لینکدونی‌های فعال (همه‌ی لایه‌ها) و استخراج لینک‌های جدید.
+    هر منبع فقط با اکانت‌های همون لایه‌ای که توش ثبت شده اسکن می‌شه.
     triggered_by: "auto" یا "manual"
     برمی‌گردونه: (total_found, new_count, links_list)
     """
-    sources = q("SELECT id, chat_id, chat_title, last_message_id "
+    sources = q("SELECT id, chat_id, chat_title, last_message_id, layer_id "
                 "FROM linkdoni_sources "
                 "WHERE admin_id=%s AND is_active=1", (ADMIN_ID,))
     if not sources:
         return 0, 0, []
 
-    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
+    accs = q("SELECT id, layer_id FROM accounts WHERE admin_id=%s AND status='active'",
              (ADMIN_ID,))
     if not accs:
         return 0, 0, []
 
-    # همه اکانت‌ها رو یه بار start می‌کنیم
-    acc_ids = [str(r[0]) for r in accs]
-    random.shuffle(acc_ids)
+    # اکانت‌ها رو به تفکیک لایه گروه‌بندی می‌کنیم تا هر منبع فقط با اکانت‌های همون لایه اسکن بشه
+    acc_ids_by_layer = {}
+    for acc_id, acc_layer_id in accs:
+        acc_ids_by_layer.setdefault(acc_layer_id, []).append(str(acc_id))
+    for lyr in acc_ids_by_layer:
+        random.shuffle(acc_ids_by_layer[lyr])
 
     clients = {}
-    for acc_id in acc_ids:
+    for acc_id in [str(r[0]) for r in accs]:
         uc = await get_user_client(acc_id)
         if not uc:
             continue
@@ -104,22 +108,26 @@ async def scan_linkdonis(triggered_by="auto"):
     new_count = 0
     all_new_links = []
 
-    for src_id, chat_id, chat_title, last_msg_id in sources:
+    for src_id, chat_id, chat_title, last_msg_id, src_layer_id in sources:
         try:
             try:
                 target = int(chat_id)
             except ValueError:
                 target = chat_id
 
-            # امتحان اکانت‌ها تا یکی جواب بده
+            # فقط اکانت‌های همین لایه رو امتحان می‌کنیم
+            layer_acc_ids = acc_ids_by_layer.get(src_layer_id, [])
             raw_msgs = None
-            for acc_id, uc in clients.items():
+            for acc_id in layer_acc_ids:
+                uc = clients.get(acc_id)
+                if not uc:
+                    continue
                 raw_msgs = await _get_history(uc, target, limit=500)
                 if raw_msgs is not None:
                     break
 
             if raw_msgs is None:
-                print(f"[Linkdoni] هیچ اکانتی به {chat_id} دسترسی نداشت.")
+                print(f"[Linkdoni] هیچ اکانتی (لایه {src_layer_id}) به {chat_id} دسترسی نداشت.")
                 continue
 
             new_last_id = last_msg_id

@@ -20,14 +20,14 @@ async def _send_banner(uc, chat_id, bt, bf, bft):
         await uc.send_message(chat_id, bt)
 
 
-async def _run_for_target(target):
-    """target = 'groups' یا 'pvs'"""
+async def _run_for_target(target, layer_id):
+    """target = 'groups' یا 'pvs' — مخصوص یک لایه‌ی مشخص"""
     now = int(time.time())
     row = q(
         "SELECT interval_minutes, last_run, last_index, group_tag_filter, acc_tag_filter, "
         "max_rounds, current_round FROM global_scheduler "
-        "WHERE admin_id=%s AND target=%s AND is_active=1",
-        (ADMIN_ID, target)
+        "WHERE admin_id=%s AND target=%s AND layer_id=%s AND is_active=1",
+        (ADMIN_ID, target, layer_id)
     )
     if not row:
         return
@@ -39,11 +39,11 @@ async def _run_for_target(target):
 
     banners = q(
         "SELECT slot, text, file_id, file_type FROM global_banners "
-        "WHERE admin_id=%s AND target=%s ORDER BY slot",
-        (ADMIN_ID, target)
+        "WHERE admin_id=%s AND target=%s AND layer_id=%s ORDER BY slot",
+        (ADMIN_ID, target, layer_id)
     )
     if not banners:
-        print(f"[GlobalScheduler:{target}] هیچ پیامی تنظیم نشده، رد شد")
+        print(f"[GlobalScheduler:{target}:L{layer_id}] هیچ پیامی تنظیم نشده، رد شد")
         return
 
     idx = last_index % len(banners)
@@ -55,12 +55,12 @@ async def _run_for_target(target):
 
     if max_rounds > 0 and new_round > max_rounds:
         u("UPDATE global_scheduler SET is_active=0, last_index=0, current_round=0 "
-          "WHERE admin_id=%s AND target=%s", (ADMIN_ID, target))
-        print(f"[GlobalScheduler:{target}] {max_rounds} دور کامل شد، غیرفعال شد.")
+          "WHERE admin_id=%s AND target=%s AND layer_id=%s", (ADMIN_ID, target, layer_id))
+        print(f"[GlobalScheduler:{target}:L{layer_id}] {max_rounds} دور کامل شد، غیرفعال شد.")
         if BOT_CLIENT:
             try:
                 await BOT_CLIENT.send_message(
-                    ADMIN_ID, f"✅ ارسال زمان‌دار {target} پس از {max_rounds} دور کامل شد و خاموش شد."
+                    ADMIN_ID, f"✅ ارسال زمان‌دار {target} (لایه {layer_id}) پس از {max_rounds} دور کامل شد و خاموش شد."
                 )
             except Exception:
                 pass
@@ -75,19 +75,20 @@ async def _run_for_target(target):
     if atag not in ("ALL", ""):
         if atag == "NOTAG":
             accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
-                     "AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
+                     "AND layer_id=%s AND (tag='' OR tag IS NULL)", (ADMIN_ID, layer_id))
         else:
-            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND tag=%s",
-                     (ADMIN_ID, atag))
+            accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s AND tag=%s",
+                     (ADMIN_ID, layer_id, atag))
     else:
-        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'", (ADMIN_ID,))
+        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                 (ADMIN_ID, layer_id))
 
     if not accs:
-        print(f"[GlobalScheduler:{target}] هیچ اکانت فعالی با فیلتر {atag} پیدا نشد")
+        print(f"[GlobalScheduler:{target}:L{layer_id}] هیچ اکانت فعالی با فیلتر {atag} پیدا نشد")
         if BOT_CLIENT:
             try:
                 await BOT_CLIENT.send_message(
-                    ADMIN_ID, f"⚠️ ارسال زمان‌دار {target}: هیچ اکانتی با فیلتر «{atag}» پیدا نشد."
+                    ADMIN_ID, f"⚠️ ارسال زمان‌دار {target} (لایه {layer_id}): هیچ اکانتی با فیلتر «{atag}» پیدا نشد."
                 )
             except Exception:
                 pass
@@ -172,30 +173,37 @@ async def _run_for_target(target):
 
     u(
         "UPDATE global_scheduler SET last_run=%s, last_index=%s, current_round=%s "
-        "WHERE admin_id=%s AND target=%s",
-        (now, new_index % len(banners), new_round, ADMIN_ID, target)
+        "WHERE admin_id=%s AND target=%s AND layer_id=%s",
+        (now, new_index % len(banners), new_round, ADMIN_ID, target, layer_id)
     )
 
     # گزارش به ادمین
     if BOT_CLIENT:
         title = "📢 گروه‌ها" if target == "groups" else "💬 پیوی‌ها"
         report = (
-            f"⏰ ارسال زمان‌دار {title} — پیام {idx+1}/{len(banners)} ارسال شد\n"
+            f"⏰ ارسال زمان‌دار {title} (لایه {layer_id}) — پیام {idx+1}/{len(banners)} ارسال شد\n"
             f"✔️ موفق: {total_ok}\n❌ ناموفق: {total_fail}\n🚫 محدود: {total_limited}\n"
             f"📨 اکانت‌های پردازش‌شده: {len(accs)}"
         )
         try:
             await BOT_CLIENT.send_message(ADMIN_ID, report)
         except Exception as e:
-            print(f"[GlobalScheduler:{target}] خطا در ارسال گزارش: {e}")
+            print(f"[GlobalScheduler:{target}:L{layer_id}] خطا در ارسال گزارش: {e}")
 
 
 async def run():
     print("📨 Global scheduler worker started")
     while True:
         try:
-            await _run_for_target("groups")
-            await _run_for_target("pvs")
+            layers = q(
+                "SELECT DISTINCT l.id FROM layers l "
+                "JOIN accounts a ON a.layer_id=l.id AND a.status='active' "
+                "WHERE l.admin_id=%s",
+                (ADMIN_ID,)
+            )
+            for (layer_id,) in layers:
+                await _run_for_target("groups", layer_id)
+                await _run_for_target("pvs", layer_id)
         except Exception as e:
             print(f"[GlobalScheduler] خطای کلی: {e}")
         await asyncio.sleep(60)

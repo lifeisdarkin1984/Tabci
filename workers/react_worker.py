@@ -117,32 +117,38 @@ async def run():
                 await run_once(acc_id, group_tag_filter=gtag or "ALL")
                 u("UPDATE react_rand SET last_run=%s WHERE account_id=%s", (now, acc_id))
 
-            # ── تنظیمات همگانی (account_id='global') ──
-            grow = q(
-                "SELECT interval_minutes, last_run, group_tag_filter, acc_tag_filter "
+            # ── تنظیمات همگانی (هر لایه مستقل — account_id='global{layer_id}') ──
+            grows = q(
+                "SELECT account_id, interval_minutes, last_run, group_tag_filter, acc_tag_filter "
                 "FROM react_rand "
-                "WHERE account_id='global' AND admin_id=%s AND is_active=1",
+                "WHERE admin_id=%s AND account_id LIKE 'global%%' AND is_active=1",
                 (ADMIN_ID,)
             )
-            if grow:
-                interval_min, last_run, gtag, atag = grow[0]
-                if now - last_run >= interval_min * 60:
-                    if atag and atag not in ("ALL", ""):
-                        if atag == "NOTAG":
-                            accs = q("SELECT id FROM accounts WHERE admin_id=%s "
-                                     "AND status='active' AND (tag='' OR tag IS NULL)", (ADMIN_ID,))
-                        else:
-                            accs = q("SELECT id FROM accounts WHERE admin_id=%s "
-                                     "AND status='active' AND tag=%s", (ADMIN_ID, atag))
+            for (gl_acc_id, interval_min, last_run, gtag, atag) in grows:
+                if STOP_FLAG:
+                    break
+                if now - last_run < interval_min * 60:
+                    continue
+                try:
+                    lyr_id = int(gl_acc_id[6:])
+                except ValueError:
+                    continue
+                if atag and atag not in ("ALL", ""):
+                    if atag == "NOTAG":
+                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
+                                 "AND layer_id=%s AND (tag='' OR tag IS NULL)", (ADMIN_ID, lyr_id))
                     else:
-                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active'",
-                                 (ADMIN_ID,))
-                    for (acc_id,) in accs:
-                        if STOP_FLAG:
-                            break
-                        await run_once(acc_id, group_tag_filter=gtag or "ALL")
-                    u("UPDATE react_rand SET last_run=%s WHERE account_id='global' AND admin_id=%s",
-                      (now, ADMIN_ID))
+                        accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' "
+                                 "AND layer_id=%s AND tag=%s", (ADMIN_ID, lyr_id, atag))
+                else:
+                    accs = q("SELECT id FROM accounts WHERE admin_id=%s AND status='active' AND layer_id=%s",
+                             (ADMIN_ID, lyr_id))
+                for (acc_id,) in accs:
+                    if STOP_FLAG:
+                        break
+                    await run_once(acc_id, group_tag_filter=gtag or "ALL")
+                u("UPDATE react_rand SET last_run=%s WHERE account_id=%s AND admin_id=%s",
+                  (now, gl_acc_id, ADMIN_ID))
 
         except Exception as e:
             print(f"[ReactWorker] خطای کلی: {e}")
