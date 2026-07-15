@@ -470,7 +470,8 @@ def register(app):
                     row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s AND layer_id=%s",
                             (ADMIN_ID, layer_id))
                     active = bool(row[0][0]) if row else False
-                    await cb.message.edit_text("🤖 **منشی خودکار همگانی**", reply_markup=global_sec_kb(active))
+                    slots = [b[0] for b in q("SELECT slot FROM banners WHERE account_id=%s AND context='g_secretary' ORDER BY slot", (acc_id,))]
+                    await cb.message.edit_text("🤖 **منشی خودکار همگانی**", reply_markup=global_sec_kb(active, slots=slots))
                 else:
                     row2 = q("SELECT is_active FROM scheduler WHERE account_id=%s", (acc_id,))
                     active2 = row2[0][0] if row2 else 0
@@ -1266,14 +1267,20 @@ def register(app):
                 accs = q("SELECT id FROM accounts WHERE admin_id=%s AND layer_id=%s", (ADMIN_ID, layer_id))
                 if not accs:
                     await cb.answer("اکانتی وجود ندارد", show_alert=True); return
-                per = max(1, len(links) // len(accs))
+                # تقسیم عادلانه — لینک‌های باقی‌مانده (باقیمانده تقسیم) هم بین اکانت‌های اول پخش می‌شن
+                n_accs = len(accs)
+                base = len(links) // n_accs
+                extra = len(links) % n_accs
                 set_stop(False)
                 tag_lbl = f"«{chosen_tag}»" if chosen_tag else "بدون برچسب"
                 await cb.message.edit_text(
                     f"🔀 {len(links)} لینک بین {len(accs)} اکانت تقسیم شد.\n🏷 برچسب: {tag_lbl}"
                 )
+                idx = 0
                 for i, (aid,) in enumerate(accs):
-                    chunk = links[i*per:(i+1)*per]
+                    size = base + (1 if i < extra else 0)
+                    chunk = links[idx:idx+size]
+                    idx += size
                     if chunk:
                         row = q("SELECT min_delay,max_delay FROM join_settings WHERE account_id=%s", (aid,))
                         mn, mx = (row[0][0], row[0][1]) if row else (180, 420)
@@ -1353,24 +1360,24 @@ def register(app):
                     txt += "🔄 دور: نامحدود\n\n"
                 else:
                     txt += f"🔄 دور: {current_round}/{max_rounds}\n\n"
-                for slot in (1, 2, 3, 4):
-                    b = next((x for x in bnrs if x[0] == slot), None)
-                    if b:
+                if bnrs:
+                    for i, b in enumerate(bnrs, 1):
                         short = (b[1] or "")[:30]
-                        txt += f"💬 پیام {slot}: [{short}{'...' if b[1] and len(b[1])>30 else ''}] {'📁' if b[2] else ''}\n"
-                    else:
-                        txt += f"💬 پیام {slot}: تنظیم نشده\n"
-                txt += "\nهر دوره یکی از این پیام‌ها به‌ترتیب شماره ارسال می‌شود."
+                        txt += f"💬 پیام {i}: [{short}{'...' if b[1] and len(b[1])>30 else ''}] {'📁' if b[2] else ''}\n"
+                else:
+                    txt += "هیچ پیامی تنظیم نشده.\n"
+                txt += "\nهر دوره یکی از این پیام‌ها به‌ترتیب ارسال می‌شود."
                 await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(
                     target, active, gtag=gtag, atag=atag,
-                    max_rounds=max_rounds, current_round=current_round))
+                    max_rounds=max_rounds, current_round=current_round,
+                    slots=[b[0] for b in bnrs]))
 
             elif d.startswith("gsch_rounds_"):
                 target = d[12:]
                 set_step(ADMIN_ID, f"gsch_rounds_{target}")
                 await cb.message.edit_text(
                     "🔄 تعداد دور را وارد کنید:\n\n"
-                    "`0` = نامحدود\n`1` = یک دور (۴ پیام)\n`2` = دو دور (۸ پیام)\n...",
+                    "`0` = نامحدود\n`1` = یک دور (یه بار همه‌ی پیام‌ها)\n`2` = دو دور\n...",
                     reply_markup=back_kb(f"gsch_panel_{target}")
                 )
 
@@ -1386,7 +1393,8 @@ def register(app):
                 active = row[0][0] if row else 0
                 gtag = row[0][1] if row else "ALL"
                 atag = row[0][2] if row else "ALL"
-                await cb.message.edit_reply_markup(global_sch_panel_kb(target, active, gtag=gtag, atag=atag))
+                slots = [b[0] for b in q("SELECT slot FROM global_banners WHERE admin_id=%s AND target=%s AND layer_id=%s ORDER BY slot", (ADMIN_ID, target, layer_id))]
+                await cb.message.edit_reply_markup(global_sch_panel_kb(target, active, gtag=gtag, atag=atag, slots=slots))
 
             elif d.startswith("gsch_gtag_"):
                 target = d[10:]
@@ -1408,7 +1416,8 @@ def register(app):
                 active = row[0][0] if row else 0
                 gtag = row[0][1] if row else "ALL"
                 atag = row[0][2] if row else "ALL"
-                await cb.message.edit_reply_markup(global_sch_panel_kb(target, active, gtag=gtag, atag=atag))
+                slots = [b[0] for b in q("SELECT slot FROM global_banners WHERE admin_id=%s AND target=%s AND layer_id=%s ORDER BY slot", (ADMIN_ID, target, layer_id))]
+                await cb.message.edit_reply_markup(global_sch_panel_kb(target, active, gtag=gtag, atag=atag, slots=slots))
 
             elif d.startswith("gsch_atag_"):
                 target = d[10:]
@@ -1449,17 +1458,27 @@ def register(app):
                 atag = (row2[0][2] if row2 else None) or "ALL"
                 max_r = row2[0][3] if row2 else 0
                 cur_r = row2[0][4] if row2 else 0
+                slots = [b[0] for b in q("SELECT slot FROM global_banners WHERE admin_id=%s AND target=%s AND layer_id=%s ORDER BY slot", (ADMIN_ID, target, layer_id))]
                 await cb.message.edit_reply_markup(global_sch_panel_kb(
-                    target, active, gtag=gtag, atag=atag, max_rounds=max_r, current_round=cur_r))
+                    target, active, gtag=gtag, atag=atag, max_rounds=max_r, current_round=cur_r, slots=slots))
 
-            elif d.startswith("gsch_b"):
-                # gsch_b1_groups / gsch_b2_pvs / ...
-                slot = int(d[6])
-                target = d[8:]
+            elif d.startswith("gsch_bv_"):
+                rest = d[8:]
+                target, _, slot = rest.rpartition("_")
+                slot = int(slot)
                 await cb.message.edit_text(
-                    f"✏️ مدیریت پیام {slot}",
+                    f"✏️ مدیریت پیام",
                     reply_markup=global_banner_slot_kb(target, slot)
                 )
+
+            elif d.startswith("gsch_badd_"):
+                target = d[10:]
+                layer_id = get_current_layer()
+                existing = q("SELECT MAX(slot) FROM global_banners WHERE admin_id=%s AND target=%s AND layer_id=%s",
+                             (ADMIN_ID, target, layer_id))
+                next_slot = (existing[0][0] or 0) + 1
+                set_step(ADMIN_ID, f"gbn_text_{target}_{next_slot}")
+                await cb.message.edit_text("📝 متن پیام جدید را وارد کنید:")
 
             elif d.startswith("gbn_add_"):
                 _, _, target, slot = d.split("_", 3)
@@ -1500,16 +1519,16 @@ def register(app):
                          "WHERE admin_id=%s AND target=%s AND layer_id=%s ORDER BY slot", (ADMIN_ID, target, layer_id))
                 txt = f"⏰ **ارسال زمان‌دار به {title}**\n\n"
                 txt += f"فاصله: هر {interval} دقیقه\nوضعیت: {'✅ فعال' if active else '❌ غیرفعال'}\n\n"
-                for slot in (1, 2, 3, 4):
-                    b = next((x for x in bnrs if x[0] == slot), None)
-                    if b:
+                if bnrs:
+                    for i, b in enumerate(bnrs, 1):
                         short = (b[1] or "")[:30]
-                        txt += f"💬 پیام {slot}: [{short}{'...' if b[1] and len(b[1])>30 else ''}] {'📁' if b[2] else ''}\n"
-                    else:
-                        txt += f"💬 پیام {slot}: تنظیم نشده\n"
-                txt += "\nهر دوره (هر X دقیقه) یکی از این پیام‌ها به‌ترتیب شماره ارسال می‌شود."
+                        txt += f"💬 پیام {i}: [{short}{'...' if b[1] and len(b[1])>30 else ''}] {'📁' if b[2] else ''}\n"
+                else:
+                    txt += "هیچ پیامی تنظیم نشده.\n"
+                txt += "\nهر دوره (هر X دقیقه) یکی از این پیام‌ها به‌ترتیب ارسال می‌شود."
                 await cb.message.edit_text(txt, reply_markup=global_sch_panel_kb(
-                    target, active, gtag=gtag, atag=atag, max_rounds=max_r, current_round=cur_r))
+                    target, active, gtag=gtag, atag=atag, max_rounds=max_r, current_round=cur_r,
+                    slots=[b[0] for b in bnrs]))
 
             elif d == "g_fwdgrp":
                 set_step(ADMIN_ID, "g_fwdgrp"); await cb.message.edit_text("📤 لینک پیام:", reply_markup=back_kb("menu_global"))
@@ -1638,13 +1657,15 @@ def register(app):
 
             elif d == "g_sec":
                 layer_id = get_current_layer()
+                gl_id = f"global{layer_id}"
                 row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s AND layer_id=%s",
                         (ADMIN_ID, layer_id))
                 active = bool(row[0][0]) if row else False
-                await cb.message.edit_text("🤖 **منشی خودکار همگانی**", reply_markup=global_sec_kb(active))
+                slots = [b[0] for b in q("SELECT slot FROM banners WHERE account_id=%s AND context='g_secretary' ORDER BY slot", (gl_id,))]
+                await cb.message.edit_text("🤖 **منشی خودکار همگانی**", reply_markup=global_sec_kb(active, slots=slots))
 
-            elif d.startswith("gsec_b"):
-                slot = int(d[6])
+            elif d.startswith("gsec_bv_"):
+                slot = int(d[8:])
                 layer_id = get_current_layer()
                 gl_id = f"global{layer_id}"
                 bnrs = q("SELECT slot,text,file_id FROM banners WHERE account_id=%s AND context='g_secretary' ORDER BY slot",
@@ -1655,15 +1676,25 @@ def register(app):
                 if not bnrs: txt += "هیچ بنری."
                 await cb.message.edit_text(txt, reply_markup=banner_slot_kb(gl_id, slot, "g_secretary"))
 
+            elif d == "gsec_badd":
+                layer_id = get_current_layer()
+                gl_id = f"global{layer_id}"
+                existing = q("SELECT MAX(slot) FROM banners WHERE account_id=%s AND context='g_secretary'", (gl_id,))
+                next_slot = (existing[0][0] or 0) + 1
+                set_step(ADMIN_ID, f"bn_text_{gl_id}_{next_slot}_g_secretary")
+                await cb.message.edit_text("📝 متن پیام جدید را وارد کنید:")
+
             elif d == "gsec_tog":
                 layer_id = get_current_layer()
+                gl_id = f"global{layer_id}"
                 row = q("SELECT is_active FROM global_secretary_settings WHERE admin_id=%s AND layer_id=%s",
                         (ADMIN_ID, layer_id))
                 new = 0 if (row and row[0][0]) else 1
                 u("INSERT INTO global_secretary_settings (admin_id,layer_id,is_active) VALUES(%s,%s,%s) "
                   "ON DUPLICATE KEY UPDATE is_active=%s", (ADMIN_ID, layer_id, new, new))
                 await cb.answer(f"منشی همگانی {'فعال' if new else 'غیرفعال'} شد", show_alert=True)
-                await cb.message.edit_reply_markup(global_sec_kb(bool(new)))
+                slots = [b[0] for b in q("SELECT slot FROM banners WHERE account_id=%s AND context='g_secretary' ORDER BY slot", (gl_id,))]
+                await cb.message.edit_reply_markup(global_sec_kb(bool(new), slots=slots))
 
             elif d == "gsec_now":
                 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, SessionExpired
