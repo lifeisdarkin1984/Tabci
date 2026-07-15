@@ -137,16 +137,22 @@ def secretary_kb(acc_id, active):
     ])
 
 # ─── منشی همگانی ────────────────────────────────────────────
-def global_sec_kb(active):
+def global_sec_kb(active, slots=None):
+    slots = slots or []
     lbl = "🔴 غیرفعال کردن" if active else "🟢 فعال کردن"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 پیام اول", callback_data="gsec_b1"),
-         InlineKeyboardButton("💬 پیام دوم", callback_data="gsec_b2")],
-        [InlineKeyboardButton("💬 پیام سوم", callback_data="gsec_b3")],
-        [InlineKeyboardButton(f"{lbl} منشی همگانی", callback_data="gsec_tog")],
-        [InlineKeyboardButton("⚡ ارسال فوری", callback_data="gsec_now")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")],
-    ])
+    rows = []
+    row = []
+    for i, slot in enumerate(slots, 1):
+        row.append(InlineKeyboardButton(f"💬 پیام {i}", callback_data=f"gsec_bv_{slot}"))
+        if len(row) == 2:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton("➕ افزودن پیام جدید", callback_data="gsec_badd")])
+    rows.append([InlineKeyboardButton(f"{lbl} منشی همگانی", callback_data="gsec_tog")])
+    rows.append([InlineKeyboardButton("⚡ ارسال فوری", callback_data="gsec_now")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="menu_global")])
+    return InlineKeyboardMarkup(rows)
 
 # ─── بنر ────────────────────────────────────────────────────
 def banner_slot_kb(acc_id, slot, ctx):
@@ -261,7 +267,8 @@ def global_sch_menu_kb():
     ])
 
 # ─── ارسال زمان‌دار همگانی - پنل (گروه/پیوی) ─────────────────
-def global_sch_panel_kb(target, active, gtag="ALL", atag="ALL", max_rounds=0, current_round=0):
+def global_sch_panel_kb(target, active, gtag="ALL", atag="ALL", max_rounds=0, current_round=0, slots=None):
+    slots = slots or []
     lbl = "🔴 خاموش کردن" if active else "🟢 روشن کردن"
     g_lbl = f"🏷 {gtag}" if gtag != "ALL" else "🏷 همه گروه‌ها"
     a_lbl = f"👤 {atag}" if atag != "ALL" else "👤 همه اکانت‌ها"
@@ -269,23 +276,27 @@ def global_sch_panel_kb(target, active, gtag="ALL", atag="ALL", max_rounds=0, cu
         rounds_lbl = "🔄 دور: نامحدود"
     else:
         rounds_lbl = f"🔄 دور: {current_round}/{max_rounds}"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 پیام ۱", callback_data=f"gsch_b1_{target}"),
-         InlineKeyboardButton("💬 پیام ۲", callback_data=f"gsch_b2_{target}")],
-        [InlineKeyboardButton("💬 پیام ۳", callback_data=f"gsch_b3_{target}"),
-         InlineKeyboardButton("💬 پیام ۴", callback_data=f"gsch_b4_{target}")],
-        [InlineKeyboardButton("⏱ تنظیم زمان", callback_data=f"gsch_time_{target}"),
-         InlineKeyboardButton(lbl, callback_data=f"gsch_tog_{target}")],
-        [InlineKeyboardButton(g_lbl, callback_data=f"gsch_gtag_{target}"),
-         InlineKeyboardButton(a_lbl, callback_data=f"gsch_atag_{target}")],
-        [InlineKeyboardButton(rounds_lbl, callback_data=f"gsch_rounds_{target}")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="g_sch_menu")],
-    ])
+    rows = []
+    row = []
+    for i, slot in enumerate(slots, 1):
+        row.append(InlineKeyboardButton(f"💬 پیام {i}", callback_data=f"gsch_bv_{target}_{slot}"))
+        if len(row) == 2:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton("➕ افزودن پیام جدید", callback_data=f"gsch_badd_{target}")])
+    rows.append([InlineKeyboardButton("⏱ تنظیم زمان", callback_data=f"gsch_time_{target}"),
+                 InlineKeyboardButton(lbl, callback_data=f"gsch_tog_{target}")])
+    rows.append([InlineKeyboardButton(g_lbl, callback_data=f"gsch_gtag_{target}"),
+                 InlineKeyboardButton(a_lbl, callback_data=f"gsch_atag_{target}")])
+    rows.append([InlineKeyboardButton(rounds_lbl, callback_data=f"gsch_rounds_{target}")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="g_sch_menu")])
+    return InlineKeyboardMarkup(rows)
 
 # ─── بنر زمان‌دار همگانی ─────────────────────────────────────
 def global_banner_slot_kb(target, slot):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🗑 حذف پیام [{slot}]", callback_data=f"gbn_del_{target}_{slot}"),
+        [InlineKeyboardButton("🗑 حذف پیام", callback_data=f"gbn_del_{target}_{slot}"),
          InlineKeyboardButton("🗑 حذف همه",            callback_data=f"gbn_delall_{target}")],
         [InlineKeyboardButton("📩 تنظیم/تغییر پیام",  callback_data=f"gbn_add_{target}_{slot}"),
          InlineKeyboardButton("🔙 بازگشت",             callback_data=f"gbn_back_{target}")],
