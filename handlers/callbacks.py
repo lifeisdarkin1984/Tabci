@@ -335,9 +335,14 @@ def register(app):
                     await cb.answer("❌ در دسترس نیست", show_alert=True); return
                 try:
                     from pyrogram import enums as en
-                    await uc.start(); me = await uc.get_me()
+                    await uc.start()
+                    me = await uc.get_me()
+                    if me is None:
+                        raise RuntimeError("get_me() مقدار None برگردوند — سشن ناقص/نامعتبره")
                     grps = chns = pvs = 0
                     async for dlg in uc.get_dialogs():
+                        if dlg.chat is None:
+                            continue
                         if dlg.chat.type in (en.ChatType.GROUP, en.ChatType.SUPERGROUP): grps += 1
                         elif dlg.chat.type == en.ChatType.CHANNEL: chns += 1
                         elif dlg.chat.type == en.ChatType.PRIVATE: pvs += 1
@@ -351,7 +356,15 @@ def register(app):
                         reply_markup=back_kb(f"acc_manage_{acc_id}")
                     )
                 except Exception as e:
-                    await cb.answer(f"❌ {str(e)[:80]}", show_alert=True)
+                    import traceback
+                    tb = traceback.format_exc()
+                    print(f"[m_stats_ ERROR] acc_id={acc_id}\n{tb}")
+                    try:
+                        await uc.stop()
+                    except Exception:
+                        pass
+                    await cb.answer(f"❌ {type(e).__name__}: {str(e)[:150]}", show_alert=True)
+
 
             # ══ خروج خودکار از گروه‌های محدود ══
             elif d.startswith("autoleave_tog_"):
@@ -1149,16 +1162,31 @@ def register(app):
                 txt = f"📊 **آمار ({len(accs)} اکانت)**\n\n"
                 for a in accs:
                     uc = await get_user_client(a[0]); grps = pvs = 0
+                    err = None
                     try:
                         from pyrogram import enums as en
                         await uc.start()
+                        me = await uc.get_me()
+                        if me is None:
+                            raise RuntimeError("get_me() → None")
                         async for dlg in uc.get_dialogs():
+                            if dlg.chat is None:
+                                continue
                             if dlg.chat.type in (en.ChatType.GROUP, en.ChatType.SUPERGROUP): grps += 1
                             elif dlg.chat.type == en.ChatType.PRIVATE: pvs += 1
                         await uc.stop()
-                    except Exception: pass
+                    except Exception as e:
+                        err = f"{type(e).__name__}: {str(e)[:100]}"
+                        print(f"[g_stats ERROR] acc_id={a[0]}\n{err}")
+                        try:
+                            await uc.stop()
+                        except Exception:
+                            pass
                     total_g += grps; total_p += pvs
-                    txt += f"👤 {a[1]} | `{a[2]}`\n🗣 {grps} گروه | 🪡 {pvs} پیوی\n\n"
+                    if err:
+                        txt += f"👤 {a[1]} | `{a[2]}`\n⚠️ خطا: {err}\n\n"
+                    else:
+                        txt += f"👤 {a[1]} | `{a[2]}`\n🗣 {grps} گروه | 🪡 {pvs} پیوی\n\n"
                 txt += f"─────\n🗣 کل گروه‌ها: {total_g}\n🪡 کل پیوی‌ها: {total_p}"
                 await cb.message.edit_text(txt, reply_markup=back_kb("menu_global"))
 
